@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package proto;
+
+// 消息头，用于标识消息类型
+message MessageHeader {
+  uint32 msg_id = 1;    // 消息ID
+  uint32 msg_len = 2;   // 消息长度（不包含头部）
+}
+
+// 客户端到服务器的消息
+message C2S_LoginRequest {
+  string username = 1;
+  string password = 2;
+}
+
+message C2S_MoveRequest {
+  int32 x = 1;
+  int32 y = 2;
+}
+
+message C2S_BuildRequest {
+  string building_type = 1;
+  int32 x = 2;
+  int32 y = 3;
+}
+
+// 服务器到客户端的消息
+message S2C_LoginResponse {
+  bool success = 1;
+  string message = 2;
+  uint64 player_id = 3;
+}
+
+message S2C_MoveResponse {
+  bool success = 1;
+  string message = 2;
+  int32 x = 3;
+  int32 y = 4;
+}
+
+message S2C_BuildResponse {
+  bool success = 1;
+  string message = 2;
+  string building_type = 3;
+  int32 x = 4;
+  int32 y = 5;
+}
+
+message S2C_PlayerUpdate {
+  uint64 player_id = 1;
+  string username = 2;
+  int32 x = 3;
+  int32 y = 4;
+  map<string, int32> resources = 5;
+}

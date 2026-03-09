@@ -1,0 +1,17 @@
+{
+  "server": {
+    "addr": "localhost:8080",
+    "max_connections": 1000,
+    "read_timeout": 30,
+    "write_timeout": 30
+  },
+  "database": {
+    "url": "mongodb://localhost:27017",
+    "database_name": "slg_game",
+    "max_pool_size": 20
+  },
+  "game": {
+    "tick_interval": 1000,
+    "max_players": 10000
+  }
+}
