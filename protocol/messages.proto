@@ -110,3 +110,23 @@ message PlayerMoveNotification {
     int32 x = 2;
     int32 y = 3;
 }
+
+// 聊天消息
+message C2S_ChatRequest {
+    string content = 1;
+    string channel = 2; // "world" 全服 / "alliance" 联盟
+}
+
+message S2C_ChatResponse {
+    bool success = 1;
+    string message = 2;
+    int64 timestamp = 3;
+}
+
+message ChatBroadcastNotification {
+    uint64 player_id = 1;
+    string username = 2;
+    string content = 3;
+    int64 timestamp = 4;
+    string channel = 5;
+}

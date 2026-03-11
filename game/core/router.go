@@ -7,6 +7,7 @@ import (
 
 	"slg-game/database"
 	"slg-game/errors"
+	"slg-game/game/chat"
 	"slg-game/log"
 	"slg-game/network"
 	pb "slg-game/protocol"
@@ -19,6 +20,7 @@ const (
 	MsgID_C2S_MoveRequest      = 1003
 	MsgID_C2S_BuildRequest     = 1004
 	MsgID_C2S_WhoRequest       = 1005
+	MsgID_C2S_ChatRequest      = 1010
 	MsgID_S2C_LoginResponse    = 2001
 	MsgID_S2C_RegisterResponse = 2002
 	MsgID_S2C_MoveResponse     = 2003
@@ -27,19 +29,23 @@ const (
 	MsgID_S2C_PlayerEnter      = 2006
 	MsgID_S2C_PlayerLeave      = 2007
 	MsgID_S2C_PlayerMove       = 2008
+	MsgID_S2C_ChatResponse     = 2010
+	MsgID_S2C_ChatBroadcast    = 2011
 )
 
 type MessageRouter struct {
 	handlers  map[uint32]func(*PlayerSession, []byte) *network.Packet
 	db        database.DB
 	playerMgr *PlayerManager
+	chatMgr   *chat.ChatManager
 }
 
-func NewMessageRouter(db database.DB, playerMgr *PlayerManager) *MessageRouter {
+func NewMessageRouter(db database.DB, playerMgr *PlayerManager, chatMgr *chat.ChatManager) *MessageRouter {
 	router := &MessageRouter{
 		handlers:  make(map[uint32]func(*PlayerSession, []byte) *network.Packet),
 		db:        db,
 		playerMgr: playerMgr,
+		chatMgr:   chatMgr,
 	}
 	router.registerHandlers()
 	return router
@@ -51,6 +57,7 @@ func (mr *MessageRouter) registerHandlers() {
 	mr.handlers[MsgID_C2S_MoveRequest] = mr.handleMoveRequest
 	mr.handlers[MsgID_C2S_BuildRequest] = mr.handleBuildRequest
 	mr.handlers[MsgID_C2S_WhoRequest] = mr.handleWhoRequest
+	mr.handlers[MsgID_C2S_ChatRequest] = mr.handleChatRequest
 }
 
 func (mr *MessageRouter) Route(session *PlayerSession, packet *network.Packet) *network.Packet {
@@ -529,6 +536,65 @@ func createWhoErrorResponse(errDetail *errors.ErrorDetail) *network.Packet {
 	if data, err := protocol.Marshal(response); err == nil {
 		return &network.Packet{
 			MsgID: MsgID_S2C_WhoResponse,
+			Data:  data,
+		}
+	}
+	return nil
+}
+
+// handleChatRequest 处理聊天消息
+func (mr *MessageRouter) handleChatRequest(session *PlayerSession, data []byte) *network.Packet {
+	if !session.IsLoggedIn() {
+		return createChatErrorResponse(errors.ErrNotLoggedInErr)
+	}
+
+	request := &pb.C2S_ChatRequest{}
+	if err := protocol.Unmarshal(data, request); err != nil {
+		log.Errorf("Failed to unmarshal chat request: %v", err)
+		return createChatErrorResponse(errors.ErrInvalidRequestErr)
+	}
+
+	// 验证消息内容
+	if len(request.Content) == 0 || len(request.Content) > 500 {
+		return createChatErrorResponse(errors.NewError(errors.ErrInvalidRequest, "Message length must be 1-500 characters"))
+	}
+
+	// 发送到聊天管理器
+	channel := request.Channel
+	if channel == "" {
+		channel = "world" // 默认全服频道
+	}
+
+	mr.chatMgr.SendChat(session, request.Content, channel)
+
+	// 返回成功响应
+	response := &pb.S2C_ChatResponse{
+		Success:   true,
+		Message:   "Message sent",
+		Timestamp: time.Now().UnixMilli(),
+	}
+
+	responseData, err := protocol.Marshal(response)
+	if err != nil {
+		log.Errorf("Failed to marshal chat response: %v", err)
+		return createChatErrorResponse(errors.ErrInternalErr)
+	}
+
+	return &network.Packet{
+		MsgID: MsgID_S2C_ChatResponse,
+		Data:  responseData,
+	}
+}
+
+// createChatErrorResponse 创建聊天错误响应
+func createChatErrorResponse(errDetail *errors.ErrorDetail) *network.Packet {
+	response := &pb.S2C_ChatResponse{
+		Success: false,
+		Message: errDetail.Message,
+	}
+	if data, err := protocol.Marshal(response); err == nil {
+		return &network.Packet{
+			MsgID: MsgID_S2C_ChatResponse,
 			Data:  data,
 		}
 	}

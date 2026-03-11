@@ -1079,6 +1079,204 @@ func (x *PlayerMoveNotification) GetY() int32 {
 	return 0
 }
 
+// 聊天消息
+type C2S_ChatRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Content string `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
+	Channel string `protobuf:"bytes,2,opt,name=channel,proto3" json:"channel,omitempty"` // "world" 全服 / "alliance" 联盟
+}
+
+func (x *C2S_ChatRequest) Reset() {
+	*x = C2S_ChatRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_protocol_messages_proto_msgTypes[16]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *C2S_ChatRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*C2S_ChatRequest) ProtoMessage() {}
+
+func (x *C2S_ChatRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_protocol_messages_proto_msgTypes[16]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use C2S_ChatRequest.ProtoReflect.Descriptor instead.
+func (*C2S_ChatRequest) Descriptor() ([]byte, []int) {
+	return file_protocol_messages_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *C2S_ChatRequest) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+func (x *C2S_ChatRequest) GetChannel() string {
+	if x != nil {
+		return x.Channel
+	}
+	return ""
+}
+
+type S2C_ChatResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Success   bool   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message   string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Timestamp int64  `protobuf:"varint,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+}
+
+func (x *S2C_ChatResponse) Reset() {
+	*x = S2C_ChatResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_protocol_messages_proto_msgTypes[17]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *S2C_ChatResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*S2C_ChatResponse) ProtoMessage() {}
+
+func (x *S2C_ChatResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_protocol_messages_proto_msgTypes[17]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use S2C_ChatResponse.ProtoReflect.Descriptor instead.
+func (*S2C_ChatResponse) Descriptor() ([]byte, []int) {
+	return file_protocol_messages_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *S2C_ChatResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *S2C_ChatResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *S2C_ChatResponse) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
+type ChatBroadcastNotification struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	PlayerId  uint64 `protobuf:"varint,1,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"`
+	Username  string `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	Content   string `protobuf:"bytes,3,opt,name=content,proto3" json:"content,omitempty"`
+	Timestamp int64  `protobuf:"varint,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Channel   string `protobuf:"bytes,5,opt,name=channel,proto3" json:"channel,omitempty"`
+}
+
+func (x *ChatBroadcastNotification) Reset() {
+	*x = ChatBroadcastNotification{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_protocol_messages_proto_msgTypes[18]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ChatBroadcastNotification) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChatBroadcastNotification) ProtoMessage() {}
+
+func (x *ChatBroadcastNotification) ProtoReflect() protoreflect.Message {
+	mi := &file_protocol_messages_proto_msgTypes[18]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChatBroadcastNotification.ProtoReflect.Descriptor instead.
+func (*ChatBroadcastNotification) Descriptor() ([]byte, []int) {
+	return file_protocol_messages_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ChatBroadcastNotification) GetPlayerId() uint64 {
+	if x != nil {
+		return x.PlayerId
+	}
+	return 0
+}
+
+func (x *ChatBroadcastNotification) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *ChatBroadcastNotification) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+func (x *ChatBroadcastNotification) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
+func (x *ChatBroadcastNotification) GetChannel() string {
+	if x != nil {
+		return x.Channel
+	}
+	return ""
+}
+
 var File_protocol_messages_proto protoreflect.FileDescriptor
 
 var file_protocol_messages_proto_rawDesc = []byte{
@@ -1197,8 +1395,30 @@ var file_protocol_messages_proto_rawDesc = []byte{
 	0x61, 0x79, 0x65, 0x72, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x08, 0x70,
 	0x6c, 0x61, 0x79, 0x65, 0x72, 0x49, 0x64, 0x12, 0x0c, 0x0a, 0x01, 0x78, 0x18, 0x02, 0x20, 0x01,
 	0x28, 0x05, 0x52, 0x01, 0x78, 0x12, 0x0c, 0x0a, 0x01, 0x79, 0x18, 0x03, 0x20, 0x01, 0x28, 0x05,
-	0x52, 0x01, 0x79, 0x42, 0x13, 0x5a, 0x11, 0x73, 0x6c, 0x67, 0x2d, 0x67, 0x61, 0x6d, 0x65, 0x2f,
-	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x63, 0x6f, 0x6c, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x52, 0x01, 0x79, 0x22, 0x45, 0x0a, 0x0f, 0x43, 0x32, 0x53, 0x5f, 0x43, 0x68, 0x61, 0x74, 0x52,
+	0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x18, 0x0a, 0x07, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e,
+	0x74, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74,
+	0x12, 0x18, 0x0a, 0x07, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x18, 0x02, 0x20, 0x01, 0x28,
+	0x09, 0x52, 0x07, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x22, 0x64, 0x0a, 0x10, 0x53, 0x32,
+	0x43, 0x5f, 0x43, 0x68, 0x61, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x18,
+	0x0a, 0x07, 0x73, 0x75, 0x63, 0x63, 0x65, 0x73, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x08, 0x52,
+	0x07, 0x73, 0x75, 0x63, 0x63, 0x65, 0x73, 0x73, 0x12, 0x18, 0x0a, 0x07, 0x6d, 0x65, 0x73, 0x73,
+	0x61, 0x67, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61,
+	0x67, 0x65, 0x12, 0x1c, 0x0a, 0x09, 0x74, 0x69, 0x6d, 0x65, 0x73, 0x74, 0x61, 0x6d, 0x70, 0x18,
+	0x03, 0x20, 0x01, 0x28, 0x03, 0x52, 0x09, 0x74, 0x69, 0x6d, 0x65, 0x73, 0x74, 0x61, 0x6d, 0x70,
+	0x22, 0xa6, 0x01, 0x0a, 0x19, 0x43, 0x68, 0x61, 0x74, 0x42, 0x72, 0x6f, 0x61, 0x64, 0x63, 0x61,
+	0x73, 0x74, 0x4e, 0x6f, 0x74, 0x69, 0x66, 0x69, 0x63, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x12, 0x1b,
+	0x0a, 0x09, 0x70, 0x6c, 0x61, 0x79, 0x65, 0x72, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28,
+	0x04, 0x52, 0x08, 0x70, 0x6c, 0x61, 0x79, 0x65, 0x72, 0x49, 0x64, 0x12, 0x1a, 0x0a, 0x08, 0x75,
+	0x73, 0x65, 0x72, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x75,
+	0x73, 0x65, 0x72, 0x6e, 0x61, 0x6d, 0x65, 0x12, 0x18, 0x0a, 0x07, 0x63, 0x6f, 0x6e, 0x74, 0x65,
+	0x6e, 0x74, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e,
+	0x74, 0x12, 0x1c, 0x0a, 0x09, 0x74, 0x69, 0x6d, 0x65, 0x73, 0x74, 0x61, 0x6d, 0x70, 0x18, 0x04,
+	0x20, 0x01, 0x28, 0x03, 0x52, 0x09, 0x74, 0x69, 0x6d, 0x65, 0x73, 0x74, 0x61, 0x6d, 0x70, 0x12,
+	0x18, 0x0a, 0x07, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x18, 0x05, 0x20, 0x01, 0x28, 0x09,
+	0x52, 0x07, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x42, 0x13, 0x5a, 0x11, 0x73, 0x6c, 0x67,
+	0x2d, 0x67, 0x61, 0x6d, 0x65, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x63, 0x6f, 0x6c, 0x62, 0x06,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -1213,31 +1433,34 @@ func file_protocol_messages_proto_rawDescGZIP() []byte {
 	return file_protocol_messages_proto_rawDescData
 }
 
-var file_protocol_messages_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_protocol_messages_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_protocol_messages_proto_goTypes = []interface{}{
-	(*C2S_LoginRequest)(nil),        // 0: protocol.C2S_LoginRequest
-	(*C2S_RegisterRequest)(nil),     // 1: protocol.C2S_RegisterRequest
-	(*C2S_MoveRequest)(nil),         // 2: protocol.C2S_MoveRequest
-	(*C2S_BuildRequest)(nil),        // 3: protocol.C2S_BuildRequest
-	(*C2S_WhoRequest)(nil),          // 4: protocol.C2S_WhoRequest
-	(*S2C_LoginResponse)(nil),       // 5: protocol.S2C_LoginResponse
-	(*S2C_RegisterResponse)(nil),    // 6: protocol.S2C_RegisterResponse
-	(*S2C_MoveResponse)(nil),        // 7: protocol.S2C_MoveResponse
-	(*S2C_BuildResponse)(nil),       // 8: protocol.S2C_BuildResponse
-	(*S2C_WhoResponse)(nil),         // 9: protocol.S2C_WhoResponse
-	(*PlayerData)(nil),              // 10: protocol.PlayerData
-	(*Building)(nil),                // 11: protocol.Building
-	(*WhoPlayerInfo)(nil),           // 12: protocol.WhoPlayerInfo
-	(*PlayerEnterNotification)(nil), // 13: protocol.PlayerEnterNotification
-	(*PlayerLeaveNotification)(nil), // 14: protocol.PlayerLeaveNotification
-	(*PlayerMoveNotification)(nil),  // 15: protocol.PlayerMoveNotification
-	nil,                             // 16: protocol.PlayerData.ResourcesEntry
+	(*C2S_LoginRequest)(nil),          // 0: protocol.C2S_LoginRequest
+	(*C2S_RegisterRequest)(nil),       // 1: protocol.C2S_RegisterRequest
+	(*C2S_MoveRequest)(nil),           // 2: protocol.C2S_MoveRequest
+	(*C2S_BuildRequest)(nil),          // 3: protocol.C2S_BuildRequest
+	(*C2S_WhoRequest)(nil),            // 4: protocol.C2S_WhoRequest
+	(*S2C_LoginResponse)(nil),         // 5: protocol.S2C_LoginResponse
+	(*S2C_RegisterResponse)(nil),      // 6: protocol.S2C_RegisterResponse
+	(*S2C_MoveResponse)(nil),          // 7: protocol.S2C_MoveResponse
+	(*S2C_BuildResponse)(nil),         // 8: protocol.S2C_BuildResponse
+	(*S2C_WhoResponse)(nil),           // 9: protocol.S2C_WhoResponse
+	(*PlayerData)(nil),                // 10: protocol.PlayerData
+	(*Building)(nil),                  // 11: protocol.Building
+	(*WhoPlayerInfo)(nil),             // 12: protocol.WhoPlayerInfo
+	(*PlayerEnterNotification)(nil),   // 13: protocol.PlayerEnterNotification
+	(*PlayerLeaveNotification)(nil),   // 14: protocol.PlayerLeaveNotification
+	(*PlayerMoveNotification)(nil),    // 15: protocol.PlayerMoveNotification
+	(*C2S_ChatRequest)(nil),           // 16: protocol.C2S_ChatRequest
+	(*S2C_ChatResponse)(nil),          // 17: protocol.S2C_ChatResponse
+	(*ChatBroadcastNotification)(nil), // 18: protocol.ChatBroadcastNotification
+	nil,                               // 19: protocol.PlayerData.ResourcesEntry
 }
 var file_protocol_messages_proto_depIdxs = []int32{
 	10, // 0: protocol.S2C_LoginResponse.player_data:type_name -> protocol.PlayerData
 	11, // 1: protocol.S2C_BuildResponse.building:type_name -> protocol.Building
 	12, // 2: protocol.S2C_WhoResponse.players:type_name -> protocol.WhoPlayerInfo
-	16, // 3: protocol.PlayerData.resources:type_name -> protocol.PlayerData.ResourcesEntry
+	19, // 3: protocol.PlayerData.resources:type_name -> protocol.PlayerData.ResourcesEntry
 	11, // 4: protocol.PlayerData.buildings:type_name -> protocol.Building
 	5,  // [5:5] is the sub-list for method output_type
 	5,  // [5:5] is the sub-list for method input_type
@@ -1444,6 +1667,42 @@ func file_protocol_messages_proto_init() {
 				return nil
 			}
 		}
+		file_protocol_messages_proto_msgTypes[16].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*C2S_ChatRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_protocol_messages_proto_msgTypes[17].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*S2C_ChatResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_protocol_messages_proto_msgTypes[18].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*ChatBroadcastNotification); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1451,7 +1710,7 @@ func file_protocol_messages_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_protocol_messages_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   17,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

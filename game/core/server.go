@@ -14,6 +14,7 @@ import (
 	"slg-game/game/battle"
 	"slg-game/game/alliance"
 	"slg-game/game/tech"
+	"slg-game/game/chat"
 )
 
 type GameServer struct {
@@ -23,6 +24,7 @@ type GameServer struct {
 	gameLoop *GameLoop
 	world    *world.World
 	players  *PlayerManager
+	chatMgr  *chat.ChatManager
 	
 	// 模块管理器
 	buildingMgr  *city.BuildingManager
@@ -40,7 +42,7 @@ func NewGameServer(db database.DB, cfg *config.Config) *GameServer {
 	players := NewPlayerManager(10)
 
 	// 创建消息路由器
-	router := NewMessageRouter(db, players)
+	router := NewMessageRouter(db, players, chatMgr)
 
 	// 创建游戏主循环（独立线程）
 	tickInterval := time.Duration(cfg.Game.TickInterval) * time.Millisecond
@@ -53,10 +55,14 @@ func NewGameServer(db database.DB, cfg *config.Config) *GameServer {
 	allianceMgr := alliance.NewAllianceManager(db)
 	techMgr := tech.NewTechnologyManager(db)
 
+	// 创建聊天管理器（独立线程）
+	chatMgr := chat.NewChatManager(players)
+
 	// 启动独立线程
 	world.StartLoop()      // World 独立循环
 	gameLoop.Start()       // GameLoop 独立循环
 	battleMgr.StartLoop()  // Battle 独立循环
+	chatMgr.StartLoop()    // Chat 独立循环
 
 	return &GameServer{
 		db:           db,
@@ -65,6 +71,7 @@ func NewGameServer(db database.DB, cfg *config.Config) *GameServer {
 		gameLoop:     gameLoop,
 		world:        world,
 		players:      players,
+		chatMgr:      chatMgr,
 		buildingMgr:  buildingMgr,
 		resourceMgr:  resourceMgr,
 		battleMgr:    battleMgr,
@@ -117,7 +124,10 @@ func (gs *GameServer) Shutdown() {
 		gs.world.StopLoop()
 	}
 	if gs.battleMgr != nil {
-		gs.battleMgr.Stop()  // 停止战斗管理器
+		gs.battleMgr.Stop()
+	}
+	if gs.chatMgr != nil {
+		gs.chatMgr.StopLoop()
 	}
 	
 	log.Println("Game server shutdown complete")
