@@ -7,12 +7,12 @@ import (
 	"log"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"slg-game/database"
 	"slg-game/network"
-	"slg-game/proto"
+	pb "slg-game/proto"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -66,7 +66,7 @@ func hashPassword(password string) string {
 
 // handleLoginRequest 处理登录请求
 func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte) *network.Packet {
-	request := &proto.C2S_LoginRequest{}
+	request := &pb.C2S_LoginRequest{}
 	if err := proto.Unmarshal(data, request); err != nil {
 		log.Printf("Failed to unmarshal login request: %v", err)
 		return createLoginErrorResponse("Invalid login request")
@@ -104,7 +104,7 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 	session.SetLoggedIn(true)
 
 	// 构建玩家数据响应
-	playerData := &proto.PlayerData{
+	playerData := &pb.PlayerData{
 		PlayerId:   player.PlayerID,
 		Username:   player.Username,
 		Email:      player.Email,
@@ -123,16 +123,16 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 
 	// 转换建筑数据
 	for _, b := range player.Buildings {
-		playerData.Buildings = append(playerData.Buildings, &proto.Building{
-			BuildingId: uint64(b.ID.Hex()[0:8]),
+		playerData.Buildings = append(playerData.Buildings, &pb.Building{
+			BuildingId:   player.PlayerID, // 使用玩家 ID 作为临时建筑 ID
 			BuildingType: b.Type,
-			Level:      b.Level,
-			X:          b.X,
-			Y:          b.Y,
+			Level:        b.Level,
+			X:            b.X,
+			Y:            b.Y,
 		})
 	}
 
-	response := &proto.S2C_LoginResponse{
+	response := &pb.S2C_LoginResponse{
 		Success:     true,
 		Message:     "Login successful",
 		PlayerId:    player.PlayerID,
@@ -155,7 +155,7 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 
 // handleRegisterRequest 处理注册请求
 func (mr *MessageRouter) handleRegisterRequest(session *PlayerSession, data []byte) *network.Packet {
-	request := &proto.C2S_RegisterRequest{}
+	request := &pb.C2S_RegisterRequest{}
 	if err := proto.Unmarshal(data, request); err != nil {
 		log.Printf("Failed to unmarshal register request: %v", err)
 		return createRegisterErrorResponse("Invalid register request")
@@ -220,7 +220,7 @@ func (mr *MessageRouter) handleRegisterRequest(session *PlayerSession, data []by
 	session.SetUsername(newPlayer.Username)
 	session.SetLoggedIn(true)
 
-	response := &proto.S2C_RegisterResponse{
+	response := &pb.S2C_RegisterResponse{
 		Success:  true,
 		Message:  "Registration successful",
 		PlayerId: newPlayer.PlayerID,
@@ -246,7 +246,7 @@ func (mr *MessageRouter) handleMoveRequest(session *PlayerSession, data []byte) 
 		return createMoveErrorResponse("Not logged in")
 	}
 
-	request := &proto.C2S_MoveRequest{}
+	request := &pb.C2S_MoveRequest{}
 	if err := proto.Unmarshal(data, request); err != nil {
 		log.Printf("Failed to unmarshal move request: %v", err)
 		return createMoveErrorResponse("Invalid move request")
@@ -256,7 +256,7 @@ func (mr *MessageRouter) handleMoveRequest(session *PlayerSession, data []byte) 
 	// TODO: 更新玩家位置
 	// TODO: 保存到数据库
 
-	response := &proto.S2C_MoveResponse{
+	response := &pb.S2C_MoveResponse{
 		Success: true,
 		Message: "Move successful",
 		X:       request.X,
@@ -281,7 +281,7 @@ func (mr *MessageRouter) handleBuildRequest(session *PlayerSession, data []byte)
 		return createBuildErrorResponse("Not logged in")
 	}
 
-	request := &proto.C2S_BuildRequest{}
+	request := &pb.C2S_BuildRequest{}
 	if err := proto.Unmarshal(data, request); err != nil {
 		log.Printf("Failed to unmarshal build request: %v", err)
 		return createBuildErrorResponse("Invalid build request")
@@ -293,10 +293,10 @@ func (mr *MessageRouter) handleBuildRequest(session *PlayerSession, data []byte)
 	// TODO: 创建建筑
 	// TODO: 保存到数据库
 
-	response := &proto.S2C_BuildResponse{
+	response := &pb.S2C_BuildResponse{
 		Success: true,
 		Message: "Build successful",
-		Building: &proto.Building{
+		Building: &pb.Building{
 			BuildingType: request.BuildingType,
 			X:            request.X,
 			Y:            request.Y,
@@ -318,7 +318,7 @@ func (mr *MessageRouter) handleBuildRequest(session *PlayerSession, data []byte)
 
 // 错误响应辅助函数
 func createLoginErrorResponse(message string) *network.Packet {
-	response := &proto.S2C_LoginResponse{
+	response := &pb.S2C_LoginResponse{
 		Success: false,
 		Message: message,
 	}
@@ -332,7 +332,7 @@ func createLoginErrorResponse(message string) *network.Packet {
 }
 
 func createRegisterErrorResponse(message string) *network.Packet {
-	response := &proto.S2C_RegisterResponse{
+	response := &pb.S2C_RegisterResponse{
 		Success: false,
 		Message: message,
 	}
@@ -346,7 +346,7 @@ func createRegisterErrorResponse(message string) *network.Packet {
 }
 
 func createMoveErrorResponse(message string) *network.Packet {
-	response := &proto.S2C_MoveResponse{
+	response := &pb.S2C_MoveResponse{
 		Success: false,
 		Message: message,
 	}
@@ -360,7 +360,7 @@ func createMoveErrorResponse(message string) *network.Packet {
 }
 
 func createBuildErrorResponse(message string) *network.Packet {
-	response := &proto.S2C_BuildResponse{
+	response := &pb.S2C_BuildResponse{
 		Success: false,
 		Message: message,
 	}

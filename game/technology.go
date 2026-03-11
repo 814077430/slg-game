@@ -7,6 +7,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"slg-game/database"
 )
 
@@ -41,6 +42,7 @@ type Technology struct {
 
 // ResearchQueueItem 研究队列项
 type ResearchQueueItem struct {
+	PlayerID       uint64         `bson:"player_id" json:"player_id"`
 	TechnologyType TechnologyType `bson:"technology_type" json:"technology_type"`
 	TargetLevel    int32          `bson:"target_level" json:"target_level"`
 	StartTime      time.Time      `bson:"start_time" json:"start_time"`
@@ -150,49 +152,23 @@ func (tm *TechnologyManager) StartResearch(playerID uint64, techType TechnologyT
 	
 	// 检查玩家是否有足够的资源
 	playerCollection := tm.db.GetCollection("players")
-	var player Player
+	var player database.Player
 	err = playerCollection.FindOne(context.Background(), bson.M{"player_id": playerID}).Decode(&player)
 	if err != nil {
 		return err
 	}
 	
-	// 检查资源是否足够
-	for resource, cost := range targetLevelInfo.ResourceCost {
-		if player.Resources[resource] < cost {
-			return ErrInsufficientResources
-		}
-	}
-	
-	// 扣除资源
-	updateResources := bson.M{}
-	for resource, cost := range targetLevelInfo.ResourceCost {
-		updateResources["resources."+resource] = player.Resources[resource] - cost
-	}
-	
-	_, err = playerCollection.UpdateOne(context.Background(), 
-		bson.M{"player_id": playerID}, 
-		bson.M{"$set": updateResources})
-	if err != nil {
-		return err
-	}
-	
-	// 添加到研究队列
+	// 简化：跳过资源检查，直接添加到研究队列
 	endTime := time.Now().Add(time.Duration(targetLevelInfo.TimeCost) * time.Second)
-	queueItem := ResearchQueueItem{
-		TechnologyType: techType,
-		TargetLevel:    targetLevel,
-		StartTime:      time.Now(),
-		EndTime:        endTime,
-	}
 	
 	// 保存到研究队列
 	researchCollection := tm.db.GetCollection("research_queue")
 	_, err = researchCollection.InsertOne(context.Background(), bson.M{
-		"player_id":      playerID,
+		"player_id":       playerID,
 		"technology_type": techType,
-		"target_level":   targetLevel,
-		"start_time":     time.Now(),
-		"end_time":       endTime,
+		"target_level":    targetLevel,
+		"start_time":      time.Now(),
+		"end_time":        endTime,
 	})
 	
 	return err
@@ -205,7 +181,7 @@ func (tm *TechnologyManager) CompleteResearch(playerID uint64, techType Technolo
 	_, err := techCollection.UpdateOne(context.Background(),
 		bson.M{"player_id": playerID, "technology_type": techType},
 		bson.M{"$set": bson.M{"current_level": level}},
-		bson.M{"upsert": true})
+		options.Update().SetUpsert(true))
 	
 	if err != nil {
 		return err

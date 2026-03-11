@@ -1,7 +1,6 @@
 package network
 
 import (
-	"bytes"
 	"encoding/binary"
 	"io"
 )
