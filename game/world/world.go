@@ -59,12 +59,13 @@ const (
 type ResourceLevel int
 
 const (
-	ResourceLevel1 ResourceLevel = iota // 1 级资源
-	ResourceLevel2                      // 2 级资源
-	ResourceLevel3                      // 3 级资源
-	ResourceLevel4                      // 4 级资源
-	ResourceLevel5                      // 5 级资源
-	ResourceLevel6                      // 6 级资源（蛮荒专属）
+	ResourceLevel0 ResourceLevel = iota // 0 级资源（无资源）
+	ResourceLevel1                      // 1 级资源（蛮荒带）
+	ResourceLevel2                      // 2 级资源（蛮荒带）
+	ResourceLevel3                      // 3 级资源（四大州）
+	ResourceLevel4                      // 4 级资源（四大州）
+	ResourceLevel5                      // 5 级资源（中心安全区）
+	ResourceLevel6                      // 6 级资源（皇城）
 )
 
 // World 游戏世界
@@ -272,19 +273,32 @@ func (w *World) GetTileType(x, y int32, zone ZoneType) TileType {
 	}
 }
 
-// GetResourceLevel 获取资源等级
+// GetResourceLevel 获取资源等级（从外围到中心越来越高）
 func (w *World) GetResourceLevel(zone ZoneType) ResourceLevel {
 	switch zone {
-	case ZoneSafe:
-		return ResourceLevel1 + ResourceLevel(rand.Intn(2)) // 1-2 级
-	case ZoneQing, ZoneJing, ZoneYong, ZoneYang:
-		return ResourceLevel2 + ResourceLevel(rand.Intn(3)) // 3-4 级
+	case ZoneEdge:
+		return ResourceLevel0 // 边缘绝境无资源（不可通行）
+		
 	case ZoneBarbarian:
+		// 蛮荒带（最外圈）：1-2 级资源
 		lvl := rand.Intn(2)
 		if lvl == 0 {
-			return ResourceLevel5
+			return ResourceLevel1
 		}
-		return ResourceLevel6 // 5-6 级
+		return ResourceLevel2
+		
+	case ZoneQing, ZoneJing, ZoneYong, ZoneYang:
+		// 四大州（中间圈）：3-4 级资源
+		return ResourceLevel3 + ResourceLevel(rand.Intn(2))
+		
+	case ZoneSafe:
+		// 中心安全区：5 级资源
+		return ResourceLevel5
+		
+	case ZoneCastle:
+		// 皇城（中心）：6 级资源（但不可占领）
+		return ResourceLevel6
+		
 	default:
 		return ResourceLevel1
 	}
@@ -292,7 +306,7 @@ func (w *World) GetResourceLevel(zone ZoneType) ResourceLevel {
 
 // GetResourceAmount 获取资源量
 func (w *World) GetResourceAmount(tileType TileType, level ResourceLevel) map[string]int32 {
-	base := int32(level) * 10
+	base := int32(level) * 15 // 基础资源量
 	
 	resources := map[string]int32{
 		"gold":  0,
@@ -300,6 +314,11 @@ func (w *World) GetResourceAmount(tileType TileType, level ResourceLevel) map[st
 		"food":  0,
 		"stone": 0,
 		"iron":  0,
+	}
+	
+	// 0 级资源（边缘绝境）无资源
+	if level == ResourceLevel0 {
+		return resources
 	}
 	
 	switch tileType {
@@ -518,6 +537,13 @@ func (w *World) printStats(zoneStats map[ZoneType]int, tileStats map[TileType]in
 		pct := float64(count) / float64(total) * 100
 		log.Printf("  %s: %d (%.2f%%)", tileType, count, pct)
 	}
+	
+	log.Println("[World] === Resource Level Distribution (从外围到中心) ===")
+	log.Println("  边缘绝境 (64 格): 0 级资源 - 不可通行")
+	log.Println("  蛮荒带 (128 格):  1-2 级资源 - 最低")
+	log.Println("  四大州：3-4 级资源 - 标准")
+	log.Println("  中心安全区：5 级资源 - 高级")
+	log.Println("  皇城：6 级资源 - 顶级（不可占领）")
 }
 
 // GetWorldInfo 获取世界信息
