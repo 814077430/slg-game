@@ -25,6 +25,7 @@ func InitMongoDB(uri, dbName string) (*Database, error) {
 
 	// 测试连接
 	if err = client.Ping(ctx, nil); err != nil {
+		client.Disconnect(ctx)
 		return nil, err
 	}
 

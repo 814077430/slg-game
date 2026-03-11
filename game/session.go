@@ -2,13 +2,13 @@ package game
 
 import (
 	"context"
-	"log"
 	"sync"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"slg-game/config"
 	"slg-game/database"
+	"slg-game/log"
 	"slg-game/network"
 )
 
@@ -98,8 +98,12 @@ func (ps *PlayerSession) Cleanup() {
 	defer ps.mutex.Unlock()
 
 	if ps.isLoggedIn && ps.playerID > 0 {
-		log.Printf("Cleaning up session for player: %s (ID: %d), duration: %v",
-			ps.username, ps.playerID, time.Since(ps.loginTime))
+		duration := time.Since(ps.loginTime)
+		log.WithFields(map[string]interface{}{
+			"player_id": ps.playerID,
+			"username":  ps.username,
+			"duration":  duration.String(),
+		}).Info("Cleaning up session")
 
 		// 保存玩家数据到数据库
 		ps.savePlayerData()
@@ -128,8 +132,14 @@ func (ps *PlayerSession) savePlayerData() {
 	)
 
 	if err != nil {
-		log.Printf("Failed to save player data for %s: %v", ps.username, err)
+		log.WithFields(map[string]interface{}{
+			"player_id": ps.playerID,
+			"username":  ps.username,
+		}).Errorf("Failed to save player data: %v", err)
 	} else {
-		log.Printf("Player data saved: %s (ID: %d)", ps.username, ps.playerID)
+		log.WithFields(map[string]interface{}{
+			"player_id": ps.playerID,
+			"username":  ps.username,
+		}).Info("Player data saved")
 	}
 }

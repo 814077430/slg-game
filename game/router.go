@@ -4,26 +4,26 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"log"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"slg-game/database"
+	"slg-game/errors"
+	"slg-game/log"
 	"slg-game/network"
 	"slg-game/proto"
 )
 
 const (
-	MsgID_C2S_LoginRequest    = 1001
-	MsgID_C2S_RegisterRequest = 1002
-	MsgID_C2S_MoveRequest     = 1003
-	MsgID_C2S_BuildRequest    = 1004
-	MsgID_S2C_LoginResponse   = 2001
+	MsgID_C2S_LoginRequest     = 1001
+	MsgID_C2S_RegisterRequest  = 1002
+	MsgID_C2S_MoveRequest      = 1003
+	MsgID_C2S_BuildRequest     = 1004
+	MsgID_S2C_LoginResponse    = 2001
 	MsgID_S2C_RegisterResponse = 2002
-	MsgID_S2C_MoveResponse    = 2003
-	MsgID_S2C_BuildResponse   = 2004
-	MsgID_S2C_PlayerUpdate    = 2005
+	MsgID_S2C_MoveResponse     = 2003
+	MsgID_S2C_BuildResponse    = 2004
 )
 
 type MessageRouter struct {
@@ -50,7 +50,7 @@ func (mr *MessageRouter) registerHandlers() {
 func (mr *MessageRouter) Route(session *PlayerSession, packet *network.Packet) *network.Packet {
 	handler, exists := mr.handlers[packet.MsgID]
 	if !exists {
-		log.Printf("Unknown message ID: %d", packet.MsgID)
+		log.Warnf("Unknown message ID: %d", packet.MsgID)
 		return nil
 	}
 
@@ -67,8 +67,12 @@ func hashPassword(password string) string {
 func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte) *network.Packet {
 	request := &proto.C2S_LoginRequest{}
 	if err := network.UnmarshalJSON(data, request); err != nil {
-		log.Printf("Failed to unmarshal login request: %v", err)
-		return createLoginErrorResponse("Invalid login request")
+		log.Errorf("Failed to unmarshal login request: %v", err)
+		return createLoginErrorResponse(errors.ErrInvalidRequestErr)
+	}
+
+	if request.Username == "" || request.Password == "" {
+		return createLoginErrorResponse(errors.NewError(errors.ErrInvalidRequest, "Username and password required"))
 	}
 
 	// 查询数据库
@@ -76,15 +80,19 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 	var player database.Player
 	err := collection.FindOne(context.Background(), bson.M{"username": request.Username}).Decode(&player)
 	if err != nil {
-		log.Printf("Login failed - user not found: %s", request.Username)
-		return createLoginErrorResponse("Invalid username or password")
+		log.WithFields(map[string]interface{}{
+			"username": request.Username,
+		}).Warn("Login failed - user not found")
+		return createLoginErrorResponse(errors.ErrUserNotFoundErr)
 	}
 
 	// 验证密码
 	hashedPassword := hashPassword(request.Password)
 	if player.PasswordHash != hashedPassword {
-		log.Printf("Login failed - wrong password for user: %s", request.Username)
-		return createLoginErrorResponse("Invalid username or password")
+		log.WithFields(map[string]interface{}{
+			"username": request.Username,
+		}).Warn("Login failed - wrong password")
+		return createLoginErrorResponse(errors.ErrWrongPasswordErr)
 	}
 
 	// 更新最后登录时间
@@ -94,7 +102,7 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 		bson.M{"$set": bson.M{"last_login": time.Now()}},
 	)
 	if err != nil {
-		log.Printf("Failed to update last login: %v", err)
+		log.Errorf("Failed to update last login: %v", err)
 	}
 
 	// 设置会话状态
@@ -140,11 +148,14 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 
 	responseData, err := network.MarshalJSON(response)
 	if err != nil {
-		log.Printf("Failed to marshal login response: %v", err)
-		return createLoginErrorResponse("Internal error")
+		log.Errorf("Failed to marshal login response: %v", err)
+		return createLoginErrorResponse(errors.ErrInternalErr)
 	}
 
-	log.Printf("Player logged in: %s (ID: %d)", player.Username, player.PlayerID)
+	log.WithFields(map[string]interface{}{
+		"player_id": player.PlayerID,
+		"username":  player.Username,
+	}).Info("Player logged in")
 
 	return &network.Packet{
 		MsgID: MsgID_S2C_LoginResponse,
@@ -156,19 +167,26 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 func (mr *MessageRouter) handleRegisterRequest(session *PlayerSession, data []byte) *network.Packet {
 	request := &proto.C2S_RegisterRequest{}
 	if err := network.UnmarshalJSON(data, request); err != nil {
-		log.Printf("Failed to unmarshal register request: %v", err)
-		return createRegisterErrorResponse("Invalid register request")
+		log.Errorf("Failed to unmarshal register request: %v", err)
+		return createRegisterErrorResponse(errors.ErrInvalidRequestErr)
+	}
+
+	if request.Username == "" || request.Password == "" {
+		return createRegisterErrorResponse(errors.NewError(errors.ErrInvalidRequest, "Username and password required"))
 	}
 
 	// 检查用户名是否已存在
 	collection := mr.db.GetCollection("players")
 	count, err := collection.CountDocuments(context.Background(), bson.M{"username": request.Username})
 	if err != nil {
-		log.Printf("Failed to check username: %v", err)
-		return createRegisterErrorResponse("Internal error")
+		log.Errorf("Failed to check username: %v", err)
+		return createRegisterErrorResponse(errors.ErrDatabaseErrorErr)
 	}
 	if count > 0 {
-		return createRegisterErrorResponse("Username already exists")
+		log.WithFields(map[string]interface{}{
+			"username": request.Username,
+		}).Warn("Register failed - username exists")
+		return createRegisterErrorResponse(errors.ErrUserExistsErr)
 	}
 
 	// 生成新的玩家 ID
@@ -210,8 +228,8 @@ func (mr *MessageRouter) handleRegisterRequest(session *PlayerSession, data []by
 
 	_, err = collection.InsertOne(context.Background(), newPlayer)
 	if err != nil {
-		log.Printf("Failed to create player: %v", err)
-		return createRegisterErrorResponse("Failed to create account")
+		log.Errorf("Failed to create player: %v", err)
+		return createRegisterErrorResponse(errors.ErrDatabaseErrorErr)
 	}
 
 	// 设置会话状态
@@ -227,11 +245,14 @@ func (mr *MessageRouter) handleRegisterRequest(session *PlayerSession, data []by
 
 	responseData, err := network.MarshalJSON(response)
 	if err != nil {
-		log.Printf("Failed to marshal register response: %v", err)
-		return createRegisterErrorResponse("Internal error")
+		log.Errorf("Failed to marshal register response: %v", err)
+		return createRegisterErrorResponse(errors.ErrInternalErr)
 	}
 
-	log.Printf("New player registered: %s (ID: %d)", newPlayer.Username, newPlayer.PlayerID)
+	log.WithFields(map[string]interface{}{
+		"player_id": newPlayer.PlayerID,
+		"username":  newPlayer.Username,
+	}).Info("New player registered")
 
 	return &network.Packet{
 		MsgID: MsgID_S2C_RegisterResponse,
@@ -242,13 +263,18 @@ func (mr *MessageRouter) handleRegisterRequest(session *PlayerSession, data []by
 // handleMoveRequest 处理移动请求
 func (mr *MessageRouter) handleMoveRequest(session *PlayerSession, data []byte) *network.Packet {
 	if !session.IsLoggedIn() {
-		return createMoveErrorResponse("Not logged in")
+		return createMoveErrorResponse(errors.ErrNotLoggedInErr)
 	}
 
 	request := &proto.C2S_MoveRequest{}
 	if err := network.UnmarshalJSON(data, request); err != nil {
-		log.Printf("Failed to unmarshal move request: %v", err)
-		return createMoveErrorResponse("Invalid move request")
+		log.Errorf("Failed to unmarshal move request: %v", err)
+		return createMoveErrorResponse(errors.ErrInvalidRequestErr)
+	}
+
+	// 验证坐标范围
+	if request.X < -10000 || request.X > 10000 || request.Y < -10000 || request.Y > 10000 {
+		return createMoveErrorResponse(errors.ErrInvalidPositionErr)
 	}
 
 	playerID := session.GetPlayerID()
@@ -262,8 +288,10 @@ func (mr *MessageRouter) handleMoveRequest(session *PlayerSession, data []byte) 
 	)
 
 	if err != nil {
-		log.Printf("Failed to update player position: %v", err)
-		return createMoveErrorResponse("Failed to update position")
+		log.WithFields(map[string]interface{}{
+			"player_id": playerID,
+		}).Errorf("Failed to update player position: %v", err)
+		return createMoveErrorResponse(errors.ErrDatabaseErrorErr)
 	}
 
 	response := &proto.S2C_MoveResponse{
@@ -275,8 +303,8 @@ func (mr *MessageRouter) handleMoveRequest(session *PlayerSession, data []byte) 
 
 	responseData, err := network.MarshalJSON(response)
 	if err != nil {
-		log.Printf("Failed to marshal move response: %v", err)
-		return createMoveErrorResponse("Internal error")
+		log.Errorf("Failed to marshal move response: %v", err)
+		return createMoveErrorResponse(errors.ErrInternalErr)
 	}
 
 	return &network.Packet{
@@ -288,16 +316,20 @@ func (mr *MessageRouter) handleMoveRequest(session *PlayerSession, data []byte) 
 // handleBuildRequest 处理建造请求
 func (mr *MessageRouter) handleBuildRequest(session *PlayerSession, data []byte) *network.Packet {
 	if !session.IsLoggedIn() {
-		return createBuildErrorResponse("Not logged in")
+		return createBuildErrorResponse(errors.ErrNotLoggedInErr)
 	}
 
 	request := &proto.C2S_BuildRequest{}
 	if err := network.UnmarshalJSON(data, request); err != nil {
-		log.Printf("Failed to unmarshal build request: %v", err)
-		return createBuildErrorResponse("Invalid build request")
+		log.Errorf("Failed to unmarshal build request: %v", err)
+		return createBuildErrorResponse(errors.ErrInvalidRequestErr)
 	}
 
-	_ = session.GetPlayerID() // TODO: 用于后续资源检查
+	if request.BuildingType == "" {
+		return createBuildErrorResponse(errors.NewError(errors.ErrInvalidRequest, "Building type required"))
+	}
+
+	playerID := session.GetPlayerID()
 
 	// TODO: 检查资源是否足够
 	// TODO: 扣除资源
@@ -316,9 +348,16 @@ func (mr *MessageRouter) handleBuildRequest(session *PlayerSession, data []byte)
 
 	responseData, err := network.MarshalJSON(response)
 	if err != nil {
-		log.Printf("Failed to marshal build response: %v", err)
-		return createBuildErrorResponse("Internal error")
+		log.Errorf("Failed to marshal build response: %v", err)
+		return createBuildErrorResponse(errors.ErrInternalErr)
 	}
+
+	log.WithFields(map[string]interface{}{
+		"player_id":     playerID,
+		"building_type": request.BuildingType,
+		"x":             request.X,
+		"y":             request.Y,
+	}).Info("Build request received")
 
 	return &network.Packet{
 		MsgID: MsgID_S2C_BuildResponse,
@@ -327,10 +366,10 @@ func (mr *MessageRouter) handleBuildRequest(session *PlayerSession, data []byte)
 }
 
 // 错误响应辅助函数
-func createLoginErrorResponse(message string) *network.Packet {
+func createLoginErrorResponse(errDetail *errors.ErrorDetail) *network.Packet {
 	response := &proto.S2C_LoginResponse{
 		Success: false,
-		Message: message,
+		Message: errDetail.Message,
 	}
 	if data, err := network.MarshalJSON(response); err == nil {
 		return &network.Packet{
@@ -341,10 +380,10 @@ func createLoginErrorResponse(message string) *network.Packet {
 	return nil
 }
 
-func createRegisterErrorResponse(message string) *network.Packet {
+func createRegisterErrorResponse(errDetail *errors.ErrorDetail) *network.Packet {
 	response := &proto.S2C_RegisterResponse{
 		Success: false,
-		Message: message,
+		Message: errDetail.Message,
 	}
 	if data, err := network.MarshalJSON(response); err == nil {
 		return &network.Packet{
@@ -355,10 +394,10 @@ func createRegisterErrorResponse(message string) *network.Packet {
 	return nil
 }
 
-func createMoveErrorResponse(message string) *network.Packet {
+func createMoveErrorResponse(errDetail *errors.ErrorDetail) *network.Packet {
 	response := &proto.S2C_MoveResponse{
 		Success: false,
-		Message: message,
+		Message: errDetail.Message,
 	}
 	if data, err := network.MarshalJSON(response); err == nil {
 		return &network.Packet{
@@ -369,10 +408,10 @@ func createMoveErrorResponse(message string) *network.Packet {
 	return nil
 }
 
-func createBuildErrorResponse(message string) *network.Packet {
+func createBuildErrorResponse(errDetail *errors.ErrorDetail) *network.Packet {
 	response := &proto.S2C_BuildResponse{
 		Success: false,
-		Message: message,
+		Message: errDetail.Message,
 	}
 	if data, err := network.MarshalJSON(response); err == nil {
 		return &network.Packet{
