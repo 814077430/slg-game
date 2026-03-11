@@ -94,18 +94,25 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 
 	// 更新最后登录时间
 	collection.UpdateOne(
-		map[string]interface{}{"player_id": player["player_id"]},
+		map[string]interface{}{"player_id": uint64(player["player_id"].(int64))},
 		map[string]interface{}{"last_login": time.Now()},
 	)
 
 	// 设置会话状态
-	session.SetPlayerID(uint64(player["player_id"].(uint64)))
+	var playerID uint64
+	switch v := player["player_id"].(type) {
+	case int64:
+		playerID = uint64(v)
+	case uint64:
+		playerID = v
+	}
+	session.SetPlayerID(playerID)
 	session.SetUsername(player["username"].(string))
 	session.SetLoggedIn(true)
 
 	// 构建玩家数据响应
 	playerData := &pb.PlayerData{
-		PlayerId:   uint64(player["player_id"].(uint64)),
+		PlayerId:   playerID,
 		Username:   player["username"].(string),
 		Email:      player["email"].(string),
 		Level:      int32(player["level"].(int32)),
@@ -122,7 +129,7 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 	response := &pb.S2C_LoginResponse{
 		Success:    true,
 		Message:    "Login successful",
-		PlayerId:   uint64(player["player_id"].(uint64)),
+		PlayerId:   playerID,
 		PlayerData: playerData,
 	}
 
@@ -133,7 +140,7 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 	}
 
 	log.WithFields(map[string]interface{}{
-		"player_id": player["player_id"],
+		"player_id": uint64(player["player_id"].(int64)),
 		"username":  player["username"],
 	}).Info("Player logged in")
 
@@ -170,14 +177,14 @@ func (mr *MessageRouter) handleRegisterRequest(session *PlayerSession, data []by
 	}
 
 	// 生成新的玩家 ID
-	lastID := uint64(10000)
+	lastID := int64(10000)
 	players := collection.GetAll()
 	for _, p := range players {
-		if id, ok := p["player_id"].(uint64); ok && id > lastID {
+		if id, ok := p["player_id"].(int64); ok && id > lastID {
 			lastID = id
 		}
 	}
-	newPlayerID := lastID + 1
+	newPlayerID := uint64(lastID + 1)
 
 	// 创建新玩家
 	hashedPassword := hashPassword(request.Password)

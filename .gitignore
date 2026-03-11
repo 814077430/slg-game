@@ -5,19 +5,9 @@
 *.so
 *.dylib
 slg-server
-slg-client
-client/slg-client
+client/slg-stress
 
-# Test binary
-*.test
-
-# Output of the go coverage tool
-*.out
-
-# Dependency directories
-vendor/
-
-# Go workspace file
+# Go workspace
 go.work
 
 # IDE
@@ -27,17 +17,28 @@ go.work
 *.swo
 *~
 
-# Logs
-logs/
-*.log
-
 # OS
 .DS_Store
 Thumbs.db
 
-# Config overrides
-config/game.local.json
+# Logs
+logs/
+*.log
+
+# Test
+coverage.out
+test-results/
 
 # Build
 build/
 dist/
+
+# OpenClaw (personal config)
+AGENTS.md
+BOOTSTRAP.md
+HEARTBEAT.md
+IDENTITY.md
+SOUL.md
+USER.md
+TOOLS.md
+SCRAPER_GUIDE.md
