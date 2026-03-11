@@ -42,26 +42,26 @@ type WorldTile struct {
 var BuildingTemplates = map[string]*BuildingTemplate{
 	"town_hall": {
 		Type:             "town_hall",
-		ResourceProduction: &Resource{Type: "gold", Amount: 10, Capacity: 10000, Production: 10},
+		ResourceProduction: map[string]int64{"gold": 10},
 	},
 	"farm": {
 		Type:             "farm",
-		ResourceProduction: &Resource{Type: "food", Amount: 0, Capacity: 10000, Production: 10},
+		ResourceProduction: map[string]int64{"food": 10},
 	},
 	"lumber_mill": {
 		Type:             "lumber_mill",
-		ResourceProduction: &Resource{Type: "wood", Amount: 0, Capacity: 10000, Production: 10},
+		ResourceProduction: map[string]int64{"wood": 10},
 	},
 	"mine": {
 		Type:             "mine",
-		ResourceProduction: &Resource{Type: "gold", Amount: 0, Capacity: 10000, Production: 10},
+		ResourceProduction: map[string]int64{"gold": 10},
 	},
 }
 
 // BuildingTemplate 建筑模板定义
 type BuildingTemplate struct {
 	Type             string
-	ResourceProduction *Resource
+	ResourceProduction map[string]int64
 }
 
 // NewWorld creates a new world instance
@@ -284,10 +284,14 @@ func (w *World) processResourceGeneration() {
 			// Get building info and generate resources
 			buildingInfo, exists := BuildingTemplates[tile.BuildingID]
 			if exists && buildingInfo.ResourceProduction != nil {
-				// Update player resources
+				// Update player resources (simplified)
 				if player, exists := w.players[tile.OwnerID]; exists {
-					// Add resources to player
-					player.Gold += int64(buildingInfo.ResourceProduction.Production)
+					// Add gold from building production
+					for resType, amount := range buildingInfo.ResourceProduction {
+						if resType == "gold" {
+							player.Gold += amount
+						}
+					}
 					go w.savePlayerData(player)
 				}
 			}
