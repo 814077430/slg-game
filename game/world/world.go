@@ -32,14 +32,14 @@ const (
 type ZoneType string
 
 const (
-	ZoneCastle   ZoneType = "castle"   // 皇城
-	ZoneSafe     ZoneType = "safe"     // 安全区
-	ZoneQing     ZoneType = "qing"     // 青州（东北）
-	ZoneJing     ZoneType = "jing"     // 荆州（东南）
-	ZoneYong     ZoneType = "yong"     // 雍州（西北）
-	ZoneYang     ZoneType = "yang"     // 扬州（西南）
-	ZoneBarbarian ZoneType = "barbarian" // 蛮荒带
-	ZoneEdge     ZoneType = "edge"     // 边缘绝境
+	ZoneCastle    ZoneType = "castle"     // 皇城
+	ZoneSafe      ZoneType = "safe"       // 安全区
+	ZoneQing      ZoneType = "qing"       // 青州（东北）
+	ZoneJing      ZoneType = "jing"       // 荆州（东南）
+	ZoneYong      ZoneType = "yong"       // 雍州（西北）
+	ZoneYang      ZoneType = "yang"       // 扬州（西南）
+	ZoneBarbarian ZoneType = "barbarian"  // 蛮荒带
+	ZoneEdge      ZoneType = "edge"       // 边缘绝境
 )
 
 // TileType 地形类型
@@ -55,17 +55,27 @@ const (
 	TileSnow     TileType = "snow"     // 雪山 5%
 )
 
-// ResourceLevel 资源等级
+// ResourceLevel 资源等级（从外到内 0-6 级）
 type ResourceLevel int
 
 const (
-	ResourceLevel0 ResourceLevel = iota // 0 级资源（无资源）
-	ResourceLevel1                      // 1 级资源（蛮荒带）
-	ResourceLevel2                      // 2 级资源（蛮荒带）
-	ResourceLevel3                      // 3 级资源（四大州）
-	ResourceLevel4                      // 4 级资源（四大州）
+	ResourceLevel0 ResourceLevel = iota // 0 级资源（边缘绝境，无资源）
+	ResourceLevel1                      // 1 级资源（蛮荒带外层）
+	ResourceLevel2                      // 2 级资源（蛮荒带内层）
+	ResourceLevel3                      // 3 级资源（四大州外层）
+	ResourceLevel4                      // 4 级资源（四大州内层）
 	ResourceLevel5                      // 5 级资源（中心安全区）
-	ResourceLevel6                      // 6 级资源（皇城）
+	ResourceLevel6                      // 6 级资源（皇城，顶级）
+)
+
+// ResourceType 资源类型
+type ResourceType string
+
+const (
+	ResourceGold  ResourceType = "gold"  // 金币
+	ResourceWood  ResourceType = "wood"  // 木材
+	ResourceFood  ResourceType = "food"  // 粮食
+	ResourceStone ResourceType = "stone" // 石料
 )
 
 // World 游戏世界
@@ -91,15 +101,16 @@ type WorldCoord struct {
 
 // WorldTile 世界地块
 type WorldTile struct {
-	Coord       WorldCoord       `json:"coord"`
-	TileType    TileType         `json:"tile_type"`
-	Zone        ZoneType         `json:"zone"`
-	OwnerID     uint64           `json:"owner_id"`
-	BuildingID  string           `json:"building_id"`
-	Resource    map[string]int32 `json:"resource"`
-	ResourceLvl ResourceLevel    `json:"resource_lvl"`
-	Passable    bool             `json:"passable"`
-	CityType    string           `json:"city_type"` // 城市类型：castle/state/county
+	Coord        WorldCoord       `json:"coord"`
+	TileType     TileType         `json:"tile_type"`
+	Zone         ZoneType         `json:"zone"`
+	OwnerID      uint64           `json:"owner_id"`
+	BuildingID   string           `json:"building_id"`
+	Resources    map[string]int32 `json:"resources"`    // 资源点 {resource_type: amount}
+	ResourceLvl  ResourceLevel    `json:"resource_lvl"` // 资源等级
+	Passable     bool             `json:"passable"`
+	CityType     string           `json:"city_type"` // 城市类型：castle/state/county
+	ResourceSpot bool             `json:"resource_spot"` // 是否是资源点
 }
 
 // NewWorld 创建世界实例
@@ -115,7 +126,7 @@ func NewWorld(db database.DB) *World {
 	}
 
 	log.Printf("[World] World initialized (%dx%d)", WorldSize, WorldSize)
-	log.Printf("[World] Center: (%d,%d)~(%d,%d) Size: %dx%d", 
+	log.Printf("[World] Center: (%d,%d)~(%d,%d) Size: %dx%d",
 		CenterStart, CenterStart, CenterEnd, CenterEnd, CenterSize, CenterSize)
 	log.Printf("[World] Castle: (%d,%d)~(%d,%d) Size: %dx%d",
 		CastleStart, CastleStart, CastleEnd, CastleEnd, CastleSize, CastleSize)
@@ -129,7 +140,7 @@ func (w *World) StartLoop() {
 	go func() {
 		defer w.wg.Done()
 		log.Printf("[World] World loop started with tick interval: %v", w.tickInterval)
-		
+
 		ticker := time.NewTicker(w.tickInterval)
 		defer ticker.Stop()
 
@@ -194,10 +205,10 @@ func (w *World) processCleanup() {
 func (w *World) GetZoneType(x, y int32) ZoneType {
 	// 边缘绝境带（最外圈 64 格）
 	if x < EdgeWidth || x >= WorldSize-EdgeWidth ||
-	   y < EdgeWidth || y >= WorldSize-EdgeWidth {
+		y < EdgeWidth || y >= WorldSize-EdgeWidth {
 		return ZoneEdge
 	}
-	
+
 	// 中心区域 256x256
 	if x >= CenterStart && x < CenterEnd && y >= CenterStart && y < CenterEnd {
 		// 皇城 64x64
@@ -206,21 +217,21 @@ func (w *World) GetZoneType(x, y int32) ZoneType {
 		}
 		return ZoneSafe
 	}
-	
+
 	// 蛮荒带（中心区外 128 格）
 	barbarianStart := CenterEnd
 	barbarianEnd := barbarianStart + BarbarianWidth
-	
+
 	if (x >= barbarianStart && x < barbarianEnd) ||
-	   (x >= WorldSize-barbarianEnd && x < WorldSize-barbarianStart) ||
-	   (y >= barbarianStart && y < barbarianEnd) ||
-	   (y >= WorldSize-barbarianEnd && y < WorldSize-barbarianStart) {
+		(x >= WorldSize-barbarianEnd && x < WorldSize-barbarianStart) ||
+		(y >= barbarianStart && y < barbarianEnd) ||
+		(y >= WorldSize-barbarianEnd && y < WorldSize-barbarianStart) {
 		return ZoneBarbarian
 	}
-	
-	// 四大州域
+
+	// 四大州
 	mid := WorldSize / 2 // 512
-	
+
 	if x < mid && y < mid {
 		return ZoneYong // 雍州（西北）
 	} else if x >= mid && y < mid {
@@ -229,6 +240,42 @@ func (w *World) GetZoneType(x, y int32) ZoneType {
 		return ZoneYang // 扬州（西南）
 	} else {
 		return ZoneJing // 荆州（东南）
+	}
+}
+
+// GetResourceLevel 获取资源等级（从外到内递增）
+func (w *World) GetResourceLevel(x, y int32, zone ZoneType) ResourceLevel {
+	// 计算到中心的距离
+	centerX := WorldSize / 2
+	centerY := WorldSize / 2
+	dx := abs32(x - centerX)
+	dy := abs32(y - centerY)
+	distance := dx + dy // 曼哈顿距离
+
+	// 根据距离计算资源等级（从外到内 0-6 级）
+	// 边缘 (distance > 700): 0 级
+	// 蛮荒带外层 (600-700): 1 级
+	// 蛮荒带内层 (500-600): 2 级
+	// 四大州外层 (400-500): 3 级
+	// 四大州内层 (300-400): 4 级
+	// 中心安全区 (200-300): 5 级
+	// 皇城 (< 200): 6 级
+
+	switch {
+	case distance > 700:
+		return ResourceLevel0 // 边缘绝境
+	case distance > 600:
+		return ResourceLevel1 // 蛮荒带外层
+	case distance > 500:
+		return ResourceLevel2 // 蛮荒带内层
+	case distance > 400:
+		return ResourceLevel3 // 四大州外层
+	case distance > 300:
+		return ResourceLevel4 // 四大州内层
+	case distance > 200:
+		return ResourceLevel5 // 中心安全区
+	default:
+		return ResourceLevel6 // 皇城
 	}
 }
 
@@ -243,17 +290,17 @@ func (w *World) GetTileType(x, y int32, zone ZoneType) TileType {
 		}
 		return TileDesert // 荒漠
 	}
-	
+
 	// 皇城区域
 	if zone == ZoneCastle {
 		return TilePlain
 	}
-	
+
 	// 使用固定种子生成地形
 	seed := int64(x*10000 + y)
 	r := rand.New(rand.NewSource(seed))
 	randVal := r.Float32()
-	
+
 	// 地形比例
 	switch {
 	case randVal < 0.30: // 30% 平原
@@ -273,79 +320,67 @@ func (w *World) GetTileType(x, y int32, zone ZoneType) TileType {
 	}
 }
 
-// GetResourceLevel 获取资源等级（从外围到中心越来越高）
-func (w *World) GetResourceLevel(zone ZoneType) ResourceLevel {
-	switch zone {
-	case ZoneEdge:
-		return ResourceLevel0 // 边缘绝境无资源（不可通行）
-		
-	case ZoneBarbarian:
-		// 蛮荒带（最外圈）：1-2 级资源
-		lvl := rand.Intn(2)
-		if lvl == 0 {
-			return ResourceLevel1
-		}
-		return ResourceLevel2
-		
-	case ZoneQing, ZoneJing, ZoneYong, ZoneYang:
-		// 四大州（中间圈）：3-4 级资源
-		return ResourceLevel3 + ResourceLevel(rand.Intn(2))
-		
-	case ZoneSafe:
-		// 中心安全区：5 级资源
-		return ResourceLevel5
-		
-	case ZoneCastle:
-		// 皇城（中心）：6 级资源（但不可占领）
-		return ResourceLevel6
-		
-	default:
-		return ResourceLevel1
-	}
-}
+// GenerateResourceSpot 生成资源点
+func (w *World) GenerateResourceSpot(x, y int32, level ResourceLevel) map[string]int32 {
+	resources := make(map[string]int32)
 
-// GetResourceAmount 获取资源量
-func (w *World) GetResourceAmount(tileType TileType, level ResourceLevel) map[string]int32 {
-	base := int32(level) * 15 // 基础资源量
-	
-	resources := map[string]int32{
-		"gold":  0,
-		"wood":  0,
-		"food":  0,
-		"stone": 0,
-		"iron":  0,
-	}
-	
-	// 0 级资源（边缘绝境）无资源
+	// 0 级无资源
 	if level == ResourceLevel0 {
 		return resources
 	}
-	
-	switch tileType {
-	case TilePlain:
-		resources["food"] = base * 2
-		resources["wood"] = base / 2
-	case TileForest:
-		resources["wood"] = base * 3
-		resources["food"] = base
-	case TileMountain:
-		resources["stone"] = base * 2
-		resources["iron"] = base
-		resources["gold"] = base / 2
-	case TileHill:
-		resources["stone"] = base * 2
-		resources["food"] = base
-	case TileRiver:
-		resources["food"] = base * 2
-		resources["wood"] = base
-	case TileDesert:
-		resources["gold"] = base * 2
-	case TileSnow:
-		resources["iron"] = base * 2
-		resources["stone"] = base
+
+	// 基础资源量 = 等级 * 15
+	baseAmount := int32(level) * 15
+
+	// 随机生成 1-3 种资源
+	rand.Seed(time.Now().UnixNano())
+	resourceCount := rand.Intn(3) + 1 // 1-3 种资源
+
+	resourceTypes := []ResourceType{ResourceGold, ResourceWood, ResourceFood, ResourceStone}
+	rand.Shuffle(len(resourceTypes), func(i, j int) {
+		resourceTypes[i], resourceTypes[j] = resourceTypes[j], resourceTypes[i]
+	})
+
+	// 分配资源
+	for i := 0; i < resourceCount; i++ {
+		resType := resourceTypes[i]
+		// 资源量 = 基础量 * (0.5-1.5 随机系数)
+		multiplier := 0.5 + rand.Float32()
+		amount := int32(float32(baseAmount) * multiplier)
+		resources[string(resType)] = amount
 	}
-	
+
 	return resources
+}
+
+// GetTileType 获取地形类型
+func (w *World) createTile(x, y int32) *WorldTile {
+	zone := w.GetZoneType(x, y)
+	tileType := w.GetTileType(x, y, zone)
+	resourceLvl := w.GetResourceLevel(x, y, zone)
+
+	// 生成资源点（30% 概率有资源）
+	rand.Seed(time.Now().UnixNano())
+	hasResourceSpot := rand.Float32() < 0.3
+
+	var resources map[string]int32
+	if hasResourceSpot {
+		resources = w.GenerateResourceSpot(x, y, resourceLvl)
+	} else {
+		resources = make(map[string]int32)
+	}
+
+	return &WorldTile{
+		Coord:        WorldCoord{X: x, Y: y},
+		TileType:     tileType,
+		Zone:         zone,
+		OwnerID:      0,
+		Resources:    resources,
+		ResourceLvl:  resourceLvl,
+		Passable:     w.IsPassable(tileType, zone),
+		CityType:     w.GetCityType(x, y, zone),
+		ResourceSpot: hasResourceSpot,
+	}
 }
 
 // IsPassable 是否可通行
@@ -353,7 +388,7 @@ func (w *World) IsPassable(tileType TileType, zone ZoneType) bool {
 	if zone == ZoneEdge {
 		return false // 边缘绝境不可通行
 	}
-	
+
 	switch tileType {
 	case TileRiver:
 		return false // 河流不可通行（需要船）
@@ -369,7 +404,7 @@ func (w *World) GetCityType(x, y int32, zone ZoneType) string {
 	if zone == ZoneCastle {
 		return "castle" // 皇城
 	}
-	
+
 	// 州府位置（每个州中心）
 	mid := WorldSize / 2
 	stateCapitals := map[ZoneType][2]int32{
@@ -378,33 +413,15 @@ func (w *World) GetCityType(x, y int32, zone ZoneType) string {
 		ZoneYong: {StateSize/4, StateSize/4},
 		ZoneYang: {StateSize/4, mid + StateSize/4},
 	}
-	
+
 	if cap, ok := stateCapitals[zone]; ok {
 		if x >= cap[0]-StateSize/4 && x < cap[0]+StateSize/4 &&
-		   y >= cap[1]-StateSize/4 && y < cap[1]+StateSize/4 {
+			y >= cap[1]-StateSize/4 && y < cap[1]+StateSize/4 {
 			return "state" // 州府
 		}
 	}
-	
-	return "" // 普通地块
-}
 
-// createTile 创建地块
-func (w *World) createTile(x, y int32) *WorldTile {
-	zone := w.GetZoneType(x, y)
-	tileType := w.GetTileType(x, y, zone)
-	resourceLvl := w.GetResourceLevel(zone)
-	
-	return &WorldTile{
-		Coord:       WorldCoord{X: x, Y: y},
-		TileType:    tileType,
-		Zone:        zone,
-		OwnerID:     0,
-		Resource:    w.GetResourceAmount(tileType, resourceLvl),
-		ResourceLvl: resourceLvl,
-		Passable:    w.IsPassable(tileType, zone),
-		CityType:    w.GetCityType(x, y, zone),
-	}
+	return "" // 普通地块
 }
 
 // GetTile 获取地块
@@ -463,17 +480,17 @@ func (w *World) ClaimTile(playerID uint64, x, y int32) error {
 	if tile == nil {
 		return nil
 	}
-	
+
 	// 皇城和安全区不可占领
 	if tile.Zone == ZoneCastle || tile.Zone == ZoneSafe {
 		return nil
 	}
-	
+
 	// 不可通行地块不可占领
 	if !tile.Passable {
 		return nil
 	}
-	
+
 	if tile.OwnerID != 0 {
 		return nil // 已被占领
 	}
@@ -494,21 +511,27 @@ func (w *World) GenerateWorld() {
 
 	log.Printf("[World] Generating world of size %dx%d", w.width, w.height)
 	startTime := time.Now()
-	
+
 	// 统计
 	stats := make(map[ZoneType]int)
 	tileStats := make(map[TileType]int)
-	
+	resourceStats := make(map[ResourceLevel]int)
+	spotCount := 0
+
 	// 生成所有地块
 	for x := int32(0); x < w.width; x++ {
 		for y := int32(0); y < w.height; y++ {
 			tile := w.createTile(x, y)
 			w.tiles[tile.Coord] = tile
-			
+
 			stats[tile.Zone]++
 			tileStats[tile.TileType]++
+			resourceStats[tile.ResourceLvl]++
+			if tile.ResourceSpot {
+				spotCount++
+			}
 		}
-		
+
 		// 进度
 		if (x+1)%(w.width/10) == 0 {
 			log.Printf("[World] Generation: %d%%", ((x+1)*100)/w.width)
@@ -517,33 +540,44 @@ func (w *World) GenerateWorld() {
 
 	elapsed := time.Since(startTime)
 	w.generated = true
-	
+
 	log.Printf("[World] World generated: %d tiles in %v", len(w.tiles), elapsed)
-	w.printStats(stats, tileStats)
+	w.printStats(stats, tileStats, resourceStats, spotCount)
 }
 
 // printStats 打印统计
-func (w *World) printStats(zoneStats map[ZoneType]int, tileStats map[TileType]int) {
+func (w *World) printStats(zoneStats map[ZoneType]int, tileStats map[TileType]int, resourceStats map[ResourceLevel]int, spotCount int) {
 	total := len(w.tiles)
-	
+
 	log.Println("[World] === Zone Statistics ===")
 	for zone, count := range zoneStats {
 		pct := float64(count) / float64(total) * 100
 		log.Printf("  %s: %d (%.2f%%)", zone, count, pct)
 	}
-	
+
 	log.Println("[World] === Terrain Statistics ===")
 	for tileType, count := range tileStats {
 		pct := float64(count) / float64(total) * 100
 		log.Printf("  %s: %d (%.2f%%)", tileType, count, pct)
 	}
-	
-	log.Println("[World] === Resource Level Distribution (从外围到中心) ===")
-	log.Println("  边缘绝境 (64 格): 0 级资源 - 不可通行")
-	log.Println("  蛮荒带 (128 格):  1-2 级资源 - 最低")
-	log.Println("  四大州：3-4 级资源 - 标准")
-	log.Println("  中心安全区：5 级资源 - 高级")
-	log.Println("  皇城：6 级资源 - 顶级（不可占领）")
+
+	log.Println("[World] === Resource Level Distribution (从外到内) ===")
+	for lvl := ResourceLevel0; lvl <= ResourceLevel6; lvl++ {
+		count := resourceStats[lvl]
+		pct := float64(count) / float64(total) * 100
+		log.Printf("  Level %d: %d (%.2f%%)", lvl, count, pct)
+	}
+
+	log.Printf("[World] Resource Spots: %d (%.2f%%)", spotCount, float64(spotCount)/float64(total)*100)
+
+	log.Println("[World] === Resource Distribution ===")
+	log.Println("  边缘绝境 (distance > 700):   0 级资源 - 无资源")
+	log.Println("  蛮荒带外层 (600-700):        1 级资源 - 最低")
+	log.Println("  蛮荒带内层 (500-600):        2 级资源 - 低")
+	log.Println("  四大州外层 (400-500):        3 级资源 - 标准")
+	log.Println("  四大州内层 (300-400):        4 级资源 - 中级")
+	log.Println("  中心安全区 (200-300):        5 级资源 - 高级")
+	log.Println("  皇城 (< 200):               6 级资源 - 顶级")
 }
 
 // GetWorldInfo 获取世界信息
@@ -589,4 +623,12 @@ func (w *World) GetTick() uint64 {
 	w.mutex.RLock()
 	defer w.mutex.RUnlock()
 	return w.currentTick
+}
+
+// abs32 int32 绝对值
+func abs32(x int32) int32 {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
