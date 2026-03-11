@@ -18,21 +18,28 @@ const (
 	MsgID_C2S_RegisterRequest  = 1002
 	MsgID_C2S_MoveRequest      = 1003
 	MsgID_C2S_BuildRequest     = 1004
+	MsgID_C2S_WhoRequest       = 1005
 	MsgID_S2C_LoginResponse    = 2001
 	MsgID_S2C_RegisterResponse = 2002
 	MsgID_S2C_MoveResponse     = 2003
 	MsgID_S2C_BuildResponse    = 2004
+	MsgID_S2C_WhoResponse      = 2005
+	MsgID_S2C_PlayerEnter      = 2006
+	MsgID_S2C_PlayerLeave      = 2007
+	MsgID_S2C_PlayerMove       = 2008
 )
 
 type MessageRouter struct {
-	handlers map[uint32]func(*PlayerSession, []byte) *network.Packet
-	db       database.DB
+	handlers  map[uint32]func(*PlayerSession, []byte) *network.Packet
+	db        database.DB
+	playerMgr *PlayerManager
 }
 
-func NewMessageRouter(db database.DB) *MessageRouter {
+func NewMessageRouter(db database.DB, playerMgr *PlayerManager) *MessageRouter {
 	router := &MessageRouter{
-		handlers: make(map[uint32]func(*PlayerSession, []byte) *network.Packet),
-		db:       db,
+		handlers:  make(map[uint32]func(*PlayerSession, []byte) *network.Packet),
+		db:        db,
+		playerMgr: playerMgr,
 	}
 	router.registerHandlers()
 	return router
@@ -43,6 +50,7 @@ func (mr *MessageRouter) registerHandlers() {
 	mr.handlers[MsgID_C2S_RegisterRequest] = mr.handleRegisterRequest
 	mr.handlers[MsgID_C2S_MoveRequest] = mr.handleMoveRequest
 	mr.handlers[MsgID_C2S_BuildRequest] = mr.handleBuildRequest
+	mr.handlers[MsgID_C2S_WhoRequest] = mr.handleWhoRequest
 }
 
 func (mr *MessageRouter) Route(session *PlayerSession, packet *network.Packet) *network.Packet {
@@ -94,7 +102,7 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 
 	// 更新最后登录时间
 	collection.UpdateOne(
-		map[string]interface{}{"player_id": uint64(player["player_id"].(int64))},
+		map[string]interface{}{"player_id": player["player_id"]},
 		map[string]interface{}{"last_login": time.Now()},
 	)
 
@@ -106,19 +114,17 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 	case uint64:
 		playerID = v
 	}
+	
 	session.SetPlayerID(playerID)
 	session.SetUsername(player["username"].(string))
 	session.SetLoggedIn(true)
 
 	// 构建玩家数据响应
 	playerData := &pb.PlayerData{
-		PlayerId:   playerID,
-		Username:   player["username"].(string),
-		Email:      player["email"].(string),
-		Level:      int32(player["level"].(int32)),
-		Experience: player["experience"].(int64),
-		X:          int32(player["x"].(int32)),
-		Y:          int32(player["y"].(int32)),
+		PlayerId: playerID,
+		Username: player["username"].(string),
+		Email:    player["email"].(string),
+		Level:    int32(player["level"].(int64)),
 		Resources: map[string]int64{
 			"gold":  player["gold"].(int64),
 			"wood":  player["wood"].(int64),
@@ -129,7 +135,7 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 	response := &pb.S2C_LoginResponse{
 		Success:    true,
 		Message:    "Login successful",
-		PlayerId:   playerID,
+		PlayerId:   uint64(player["player_id"].(int64)),
 		PlayerData: playerData,
 	}
 
@@ -140,7 +146,7 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 	}
 
 	log.WithFields(map[string]interface{}{
-		"player_id": uint64(player["player_id"].(int64)),
+		"player_id": player["player_id"],
 		"username":  player["username"],
 	}).Info("Player logged in")
 
@@ -177,14 +183,13 @@ func (mr *MessageRouter) handleRegisterRequest(session *PlayerSession, data []by
 	}
 
 	// 生成新的玩家 ID
-	lastID := int64(10000)
-	players := collection.GetAll()
-	for _, p := range players {
-		if id, ok := p["player_id"].(int64); ok && id > lastID {
-			lastID = id
+	lastPlayer, err := collection.FindOne(map[string]interface{}{})
+	newPlayerID := int64(10001)
+	if err == nil && lastPlayer != nil {
+		if lastID, ok := lastPlayer["player_id"].(int64); ok {
+			newPlayerID = lastID + 1
 		}
 	}
-	newPlayerID := uint64(lastID + 1)
 
 	// 创建新玩家
 	hashedPassword := hashPassword(request.Password)
@@ -195,15 +200,15 @@ func (mr *MessageRouter) handleRegisterRequest(session *PlayerSession, data []by
 		"email":          request.Email,
 		"created_at":     time.Now(),
 		"last_login":     time.Now(),
-		"level":          int32(1),
+		"level":          int64(1),
 		"experience":     int64(0),
 		"gold":           int64(1000),
 		"wood":           int64(1000),
 		"food":           int64(1000),
-		"population":     int32(0),
-		"max_population": int32(100),
-		"x":              int32(0),
-		"y":              int32(0),
+		"population":     int64(0),
+		"max_population": int64(100),
+		"x":              int64(0),
+		"y":              int64(0),
 		"buildings":      []interface{}{},
 		"troops":         []interface{}{},
 		"research":       make(map[string]int32),
@@ -216,14 +221,14 @@ func (mr *MessageRouter) handleRegisterRequest(session *PlayerSession, data []by
 	}
 
 	// 设置会话状态
-	session.SetPlayerID(newPlayerID)
+	session.SetPlayerID(uint64(newPlayerID))
 	session.SetUsername(request.Username)
 	session.SetLoggedIn(true)
 
 	response := &pb.S2C_RegisterResponse{
 		Success:  true,
 		Message:  "Registration successful",
-		PlayerId: newPlayerID,
+		PlayerId: uint64(newPlayerID),
 	}
 
 	responseData, err := protocol.Marshal(response)
@@ -263,18 +268,17 @@ func (mr *MessageRouter) handleMoveRequest(session *PlayerSession, data []byte) 
 	playerID := session.GetPlayerID()
 
 	// 更新玩家位置
+	session.SetPosition(request.X, request.Y)
+
+	// 更新数据库
 	collection := mr.db.GetCollection("players")
-	err := collection.UpdateOne(
+	collection.UpdateOne(
 		map[string]interface{}{"player_id": playerID},
 		map[string]interface{}{"x": request.X, "y": request.Y},
 	)
 
-	if err != nil {
-		log.WithFields(map[string]interface{}{
-			"player_id": playerID,
-		}).Errorf("Failed to update player position: %v", err)
-		return createMoveErrorResponse(errors.ErrDatabaseErrorErr)
-	}
+	// 通知视野内其他玩家
+	mr.notifyPlayerMove(playerID, request.X, request.Y)
 
 	response := &pb.S2C_MoveResponse{
 		Success: true,
@@ -343,6 +347,123 @@ func (mr *MessageRouter) handleBuildRequest(session *PlayerSession, data []byte)
 	}
 }
 
+// handleWhoRequest 处理视野内玩家列表请求
+func (mr *MessageRouter) handleWhoRequest(session *PlayerSession, data []byte) *network.Packet {
+	if !session.IsLoggedIn() {
+		return createWhoErrorResponse(errors.ErrNotLoggedInErr)
+	}
+
+	playerID := session.GetPlayerID()
+	
+	// 获取视野内的玩家
+	visiblePlayers := mr.playerMgr.GetPlayersInVision(playerID)
+	
+	// 构建响应
+	players := make([]*pb.WhoPlayerInfo, 0, len(visiblePlayers))
+	for _, p := range visiblePlayers {
+		players = append(players, &pb.WhoPlayerInfo{
+			PlayerId: p.ID,
+			Username: p.Username,
+			X:        p.X,
+			Y:        p.Y,
+		})
+	}
+	
+	response := &pb.S2C_WhoResponse{
+		Success: true,
+		Players: players,
+	}
+	
+	responseData, err := protocol.Marshal(response)
+	if err != nil {
+		log.Errorf("Failed to marshal who response: %v", err)
+		return createWhoErrorResponse(errors.ErrInternalErr)
+	}
+	
+	return &network.Packet{
+		MsgID: MsgID_S2C_WhoResponse,
+		Data:  responseData,
+	}
+}
+
+// notifyPlayerEnter 通知视野内玩家有新玩家进入
+func (mr *MessageRouter) notifyPlayerEnter(playerID uint64, x, y int32) {
+	if mr.playerMgr == nil {
+		return
+	}
+	
+	// 获取视野内的其他玩家
+	visiblePlayers := mr.playerMgr.GetPlayersInVision(playerID)
+	
+	notification := &pb.PlayerEnterNotification{
+		PlayerId: playerID,
+		X:        x,
+		Y:        y,
+	}
+	data, _ := protocol.Marshal(notification)
+	
+	// 通知视野内的玩家
+	for _, p := range visiblePlayers {
+		session := mr.playerMgr.GetSession(p.ID)
+		if session != nil {
+			session.SendPacket(&network.Packet{
+				MsgID: MsgID_S2C_PlayerEnter,
+				Data:  data,
+			})
+		}
+	}
+}
+
+// notifyPlayerLeave 通知视野内玩家有玩家离开
+func (mr *MessageRouter) notifyPlayerLeave(playerID uint64) {
+	if mr.playerMgr == nil {
+		return
+	}
+	
+	visiblePlayers := mr.playerMgr.GetPlayersInVision(playerID)
+	
+	notification := &pb.PlayerLeaveNotification{
+		PlayerId: playerID,
+	}
+	data, _ := protocol.Marshal(notification)
+	
+	for _, p := range visiblePlayers {
+		session := mr.playerMgr.GetSession(p.ID)
+		if session != nil {
+			session.SendPacket(&network.Packet{
+				MsgID: MsgID_S2C_PlayerLeave,
+				Data:  data,
+			})
+		}
+	}
+}
+
+// notifyPlayerMove 通知视野内玩家移动
+func (mr *MessageRouter) notifyPlayerMove(playerID uint64, x, y int32) {
+	if mr.playerMgr == nil {
+		return
+	}
+	
+	visiblePlayers := mr.playerMgr.GetPlayersInVision(playerID)
+	
+	notification := &pb.PlayerMoveNotification{
+		PlayerId: playerID,
+		X:        x,
+		Y:        y,
+	}
+	data, _ := protocol.Marshal(notification)
+	
+	for _, p := range visiblePlayers {
+		session := mr.playerMgr.GetSession(p.ID)
+		if session != nil {
+			session.SendPacket(&network.Packet{
+				MsgID: MsgID_S2C_PlayerMove,
+				Data:  data,
+			})
+		}
+	}
+}
+
 // 错误响应辅助函数
 func createLoginErrorResponse(errDetail *errors.ErrorDetail) *network.Packet {
 	response := &pb.S2C_LoginResponse{
@@ -394,6 +515,20 @@ func createBuildErrorResponse(errDetail *errors.ErrorDetail) *network.Packet {
 	if data, err := protocol.Marshal(response); err == nil {
 		return &network.Packet{
 			MsgID: MsgID_S2C_BuildResponse,
+			Data:  data,
+		}
+	}
+	return nil
+}
+
+func createWhoErrorResponse(errDetail *errors.ErrorDetail) *network.Packet {
+	response := &pb.S2C_WhoResponse{
+		Success: false,
+		Message: errDetail.Message,
+	}
+	if data, err := protocol.Marshal(response); err == nil {
+		return &network.Packet{
+			MsgID: MsgID_S2C_WhoResponse,
 			Data:  data,
 		}
 	}

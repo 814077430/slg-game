@@ -22,6 +22,7 @@ type GameServer struct {
 	router   *MessageRouter
 	gameLoop *GameLoop
 	world    *world.World
+	players  *PlayerManager
 	
 	// 模块管理器
 	buildingMgr  *city.BuildingManager
@@ -32,11 +33,14 @@ type GameServer struct {
 }
 
 func NewGameServer(db database.DB, cfg *config.Config) *GameServer {
-	// 创建消息路由器
-	router := NewMessageRouter(db)
-
 	// 创建世界实例（独立线程）
 	world := world.NewWorld(db)
+
+	// 创建玩家管理器（视野范围 10 格）
+	players := NewPlayerManager(10)
+
+	// 创建消息路由器
+	router := NewMessageRouter(db, players)
 
 	// 创建游戏主循环（独立线程）
 	tickInterval := time.Duration(cfg.Game.TickInterval) * time.Millisecond
@@ -60,6 +64,7 @@ func NewGameServer(db database.DB, cfg *config.Config) *GameServer {
 		router:       router,
 		gameLoop:     gameLoop,
 		world:        world,
+		players:      players,
 		buildingMgr:  buildingMgr,
 		resourceMgr:  resourceMgr,
 		battleMgr:    battleMgr,
@@ -77,7 +82,7 @@ func (gs *GameServer) HandleClient(conn net.Conn) {
 	log.Printf("New client connected: %s", conn.RemoteAddr())
 
 	// 创建玩家会话
-	session := NewPlayerSession(connection, gs.db, gs.config)
+	session := NewPlayerSession(connection, gs.db, gs.config, gs.players)
 
 	for {
 		packet, err := connection.ReadPacket()
