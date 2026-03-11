@@ -1,4 +1,4 @@
-package game
+package alliance
 
 import (
 	"fmt"

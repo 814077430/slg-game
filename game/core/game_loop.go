@@ -1,4 +1,4 @@
-package game
+package core
 
 import (
 	"log"
@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"slg-game/database"
+	"slg-game/game/world"
 )
 
 // GameLoop 游戏主循环
@@ -15,25 +16,16 @@ type GameLoop struct {
 	tickCount     uint64
 	stopChan      chan struct{}
 	wg            sync.WaitGroup
-	resourceMgr   *ResourceManager
-	buildingMgr   *BuildingManager
-	technologyMgr *TechnologyManager
-	world         *World
+	world         *world.World
 }
 
 // NewGameLoop 创建游戏主循环
-func NewGameLoop(
-	db *database.MemoryDB,
-	tickInterval time.Duration,
-) *GameLoop {
+func NewGameLoop(db *database.MemoryDB, tickInterval time.Duration, world *world.World) *GameLoop {
 	return &GameLoop{
-		db:            db,
-		tickInterval:  tickInterval,
-		stopChan:      make(chan struct{}),
-		resourceMgr:   NewResourceManager(db),
-		buildingMgr:   NewBuildingManager(db),
-		technologyMgr: NewTechnologyManager(db),
-		world:         NewWorld(db),
+		db:           db,
+		tickInterval: tickInterval,
+		stopChan:     make(chan struct{}),
+		world:        world,
 	}
 }
 
@@ -57,10 +49,6 @@ func (gl *GameLoop) Start() {
 			}
 		}
 	}()
-
-	// 启动资源收集器（每分钟收集一次）
-	resourceCollector := NewResourceCollector(gl.resourceMgr, time.Minute)
-	resourceCollector.Start()
 }
 
 // Stop 停止游戏主循环
@@ -89,7 +77,9 @@ func (gl *GameLoop) tick() {
 	gl.processArmyMovement()
 
 	// 更新世界状态
-	gl.world.Tick()
+	if gl.world != nil {
+		gl.world.Tick()
+	}
 }
 
 // processBuildingCompletion 处理建筑建造完成
@@ -105,19 +95,4 @@ func (gl *GameLoop) processTechnologyCompletion() {
 // processArmyMovement 处理军队移动
 func (gl *GameLoop) processArmyMovement() {
 	// TODO: 处理军队移动和战斗
-}
-
-// GetResourceManager 获取资源管理器
-func (gl *GameLoop) GetResourceManager() *ResourceManager {
-	return gl.resourceMgr
-}
-
-// GetBuildingManager 获取建筑管理器
-func (gl *GameLoop) GetBuildingManager() *BuildingManager {
-	return gl.buildingMgr
-}
-
-// GetWorld 获取世界实例
-func (gl *GameLoop) GetWorld() *World {
-	return gl.world
 }

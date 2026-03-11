@@ -1,4 +1,4 @@
-package game
+package world
 
 import (
 	"log"
@@ -27,37 +27,11 @@ type WorldCoord struct {
 
 // WorldTile represents a single tile in the world
 type WorldTile struct {
-	Coord      WorldCoord         `json:"coord"`
-	TileType   string             `json:"tile_type"`
-	OwnerID    uint64             `json:"owner_id"`
-	BuildingID string             `json:"building_id"`
-	Resource   map[string]int32   `json:"resource"`
-}
-
-// BuildingTemplates 建筑模板
-var BuildingTemplates = map[string]*BuildingTemplate{
-	"town_hall": {
-		Type:               "town_hall",
-		ResourceProduction: map[string]int64{"gold": 10},
-	},
-	"farm": {
-		Type:               "farm",
-		ResourceProduction: map[string]int64{"food": 10},
-	},
-	"lumber_mill": {
-		Type:               "lumber_mill",
-		ResourceProduction: map[string]int64{"wood": 10},
-	},
-	"mine": {
-		Type:               "mine",
-		ResourceProduction: map[string]int64{"gold": 10},
-	},
-}
-
-// BuildingTemplate 建筑模板定义
-type BuildingTemplate struct {
-	Type               string
-	ResourceProduction map[string]int64
+	Coord      WorldCoord       `json:"coord"`
+	TileType   string           `json:"tile_type"`
+	OwnerID    uint64           `json:"owner_id"`
+	BuildingID string           `json:"building_id"`
+	Resource   map[string]int32 `json:"resource"`
 }
 
 // NewWorld creates a new world instance
@@ -70,7 +44,6 @@ func NewWorld(db *database.MemoryDB) *World {
 		stopChannel: make(chan struct{}),
 	}
 
-	// 内存模式不加载数据
 	log.Println("World initialized (memory mode)")
 
 	return world
@@ -86,7 +59,6 @@ func (w *World) GetTile(x, y int32) *WorldTile {
 		return tile
 	}
 
-	// Create default tile
 	defaultTile := &WorldTile{
 		Coord:    coord,
 		TileType: "grass",
@@ -137,7 +109,7 @@ func (w *World) ClaimTile(playerID uint64, x, y int32) error {
 	tile := w.GetTile(x, y)
 
 	if tile.OwnerID != 0 {
-		return nil // Tile already claimed
+		return nil
 	}
 
 	tile.OwnerID = playerID
@@ -168,7 +140,6 @@ func (w *World) StopGameLoop() {
 
 // tick processes one game tick for the world
 func (w *World) tick() {
-	// Process resource generation
 	w.processResourceGeneration()
 }
 
@@ -179,14 +150,10 @@ func (w *World) processResourceGeneration() {
 
 	for _, tile := range w.tiles {
 		if tile.BuildingID != "" && tile.OwnerID != 0 {
-			buildingInfo, exists := BuildingTemplates[tile.BuildingID]
-			if exists && buildingInfo.ResourceProduction != nil {
-				// Update player resources (simplified)
-				if player, exists := w.players[tile.OwnerID]; exists {
-					for resType, amount := range buildingInfo.ResourceProduction {
-						if current, ok := player[resType].(int64); ok {
-							player[resType] = current + amount
-						}
+			if player, exists := w.players[tile.OwnerID]; exists {
+				for resType, amount := range map[string]int64{"gold": 10} {
+					if current, ok := player[resType].(int64); ok {
+						player[resType] = current + amount
 					}
 				}
 			}
