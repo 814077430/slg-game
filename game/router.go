@@ -9,7 +9,8 @@ import (
 	"slg-game/errors"
 	"slg-game/log"
 	"slg-game/network"
-	"slg-game/proto"
+	pb "slg-game/protocol"
+	"slg-game/protocol"
 )
 
 const (
@@ -62,8 +63,8 @@ func hashPassword(password string) string {
 
 // handleLoginRequest 处理登录请求
 func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte) *network.Packet {
-	request := &proto.C2S_LoginRequest{}
-	if err := network.UnmarshalJSON(data, request); err != nil {
+	request := &pb.C2S_LoginRequest{}
+	if err := protocol.Unmarshal(data, request); err != nil {
 		log.Errorf("Failed to unmarshal login request: %v", err)
 		return createLoginErrorResponse(errors.ErrInvalidRequestErr)
 	}
@@ -103,7 +104,7 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 	session.SetLoggedIn(true)
 
 	// 构建玩家数据响应
-	playerData := &proto.PlayerData{
+	playerData := &pb.PlayerData{
 		PlayerId:   uint64(player["player_id"].(uint64)),
 		Username:   player["username"].(string),
 		Email:      player["email"].(string),
@@ -118,14 +119,14 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 		},
 	}
 
-	response := &proto.S2C_LoginResponse{
+	response := &pb.S2C_LoginResponse{
 		Success:    true,
 		Message:    "Login successful",
 		PlayerId:   uint64(player["player_id"].(uint64)),
 		PlayerData: playerData,
 	}
 
-	responseData, err := network.MarshalJSON(response)
+	responseData, err := protocol.Marshal(response)
 	if err != nil {
 		log.Errorf("Failed to marshal login response: %v", err)
 		return createLoginErrorResponse(errors.ErrInternalErr)
@@ -144,8 +145,8 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 
 // handleRegisterRequest 处理注册请求
 func (mr *MessageRouter) handleRegisterRequest(session *PlayerSession, data []byte) *network.Packet {
-	request := &proto.C2S_RegisterRequest{}
-	if err := network.UnmarshalJSON(data, request); err != nil {
+	request := &pb.C2S_RegisterRequest{}
+	if err := protocol.Unmarshal(data, request); err != nil {
 		log.Errorf("Failed to unmarshal register request: %v", err)
 		return createRegisterErrorResponse(errors.ErrInvalidRequestErr)
 	}
@@ -212,13 +213,13 @@ func (mr *MessageRouter) handleRegisterRequest(session *PlayerSession, data []by
 	session.SetUsername(request.Username)
 	session.SetLoggedIn(true)
 
-	response := &proto.S2C_RegisterResponse{
+	response := &pb.S2C_RegisterResponse{
 		Success:  true,
 		Message:  "Registration successful",
 		PlayerId: newPlayerID,
 	}
 
-	responseData, err := network.MarshalJSON(response)
+	responseData, err := protocol.Marshal(response)
 	if err != nil {
 		log.Errorf("Failed to marshal register response: %v", err)
 		return createRegisterErrorResponse(errors.ErrInternalErr)
@@ -241,8 +242,8 @@ func (mr *MessageRouter) handleMoveRequest(session *PlayerSession, data []byte) 
 		return createMoveErrorResponse(errors.ErrNotLoggedInErr)
 	}
 
-	request := &proto.C2S_MoveRequest{}
-	if err := network.UnmarshalJSON(data, request); err != nil {
+	request := &pb.C2S_MoveRequest{}
+	if err := protocol.Unmarshal(data, request); err != nil {
 		log.Errorf("Failed to unmarshal move request: %v", err)
 		return createMoveErrorResponse(errors.ErrInvalidRequestErr)
 	}
@@ -268,14 +269,14 @@ func (mr *MessageRouter) handleMoveRequest(session *PlayerSession, data []byte) 
 		return createMoveErrorResponse(errors.ErrDatabaseErrorErr)
 	}
 
-	response := &proto.S2C_MoveResponse{
+	response := &pb.S2C_MoveResponse{
 		Success: true,
 		Message: "Move successful",
 		X:       request.X,
 		Y:       request.Y,
 	}
 
-	responseData, err := network.MarshalJSON(response)
+	responseData, err := protocol.Marshal(response)
 	if err != nil {
 		log.Errorf("Failed to marshal move response: %v", err)
 		return createMoveErrorResponse(errors.ErrInternalErr)
@@ -293,8 +294,8 @@ func (mr *MessageRouter) handleBuildRequest(session *PlayerSession, data []byte)
 		return createBuildErrorResponse(errors.ErrNotLoggedInErr)
 	}
 
-	request := &proto.C2S_BuildRequest{}
-	if err := network.UnmarshalJSON(data, request); err != nil {
+	request := &pb.C2S_BuildRequest{}
+	if err := protocol.Unmarshal(data, request); err != nil {
 		log.Errorf("Failed to unmarshal build request: %v", err)
 		return createBuildErrorResponse(errors.ErrInvalidRequestErr)
 	}
@@ -305,10 +306,10 @@ func (mr *MessageRouter) handleBuildRequest(session *PlayerSession, data []byte)
 
 	playerID := session.GetPlayerID()
 
-	response := &proto.S2C_BuildResponse{
+	response := &pb.S2C_BuildResponse{
 		Success: true,
 		Message: "Build request received",
-		Building: &proto.Building{
+		Building: &pb.Building{
 			BuildingType: request.BuildingType,
 			X:            request.X,
 			Y:            request.Y,
@@ -316,7 +317,7 @@ func (mr *MessageRouter) handleBuildRequest(session *PlayerSession, data []byte)
 		},
 	}
 
-	responseData, err := network.MarshalJSON(response)
+	responseData, err := protocol.Marshal(response)
 	if err != nil {
 		log.Errorf("Failed to marshal build response: %v", err)
 		return createBuildErrorResponse(errors.ErrInternalErr)
@@ -337,11 +338,11 @@ func (mr *MessageRouter) handleBuildRequest(session *PlayerSession, data []byte)
 
 // 错误响应辅助函数
 func createLoginErrorResponse(errDetail *errors.ErrorDetail) *network.Packet {
-	response := &proto.S2C_LoginResponse{
+	response := &pb.S2C_LoginResponse{
 		Success: false,
 		Message: errDetail.Message,
 	}
-	if data, err := network.MarshalJSON(response); err == nil {
+	if data, err := protocol.Marshal(response); err == nil {
 		return &network.Packet{
 			MsgID: MsgID_S2C_LoginResponse,
 			Data:  data,
@@ -351,11 +352,11 @@ func createLoginErrorResponse(errDetail *errors.ErrorDetail) *network.Packet {
 }
 
 func createRegisterErrorResponse(errDetail *errors.ErrorDetail) *network.Packet {
-	response := &proto.S2C_RegisterResponse{
+	response := &pb.S2C_RegisterResponse{
 		Success: false,
 		Message: errDetail.Message,
 	}
-	if data, err := network.MarshalJSON(response); err == nil {
+	if data, err := protocol.Marshal(response); err == nil {
 		return &network.Packet{
 			MsgID: MsgID_S2C_RegisterResponse,
 			Data:  data,
@@ -365,11 +366,11 @@ func createRegisterErrorResponse(errDetail *errors.ErrorDetail) *network.Packet 
 }
 
 func createMoveErrorResponse(errDetail *errors.ErrorDetail) *network.Packet {
-	response := &proto.S2C_MoveResponse{
+	response := &pb.S2C_MoveResponse{
 		Success: false,
 		Message: errDetail.Message,
 	}
-	if data, err := network.MarshalJSON(response); err == nil {
+	if data, err := protocol.Marshal(response); err == nil {
 		return &network.Packet{
 			MsgID: MsgID_S2C_MoveResponse,
 			Data:  data,
@@ -379,11 +380,11 @@ func createMoveErrorResponse(errDetail *errors.ErrorDetail) *network.Packet {
 }
 
 func createBuildErrorResponse(errDetail *errors.ErrorDetail) *network.Packet {
-	response := &proto.S2C_BuildResponse{
+	response := &pb.S2C_BuildResponse{
 		Success: false,
 		Message: errDetail.Message,
 	}
-	if data, err := network.MarshalJSON(response); err == nil {
+	if data, err := protocol.Marshal(response); err == nil {
 		return &network.Packet{
 			MsgID: MsgID_S2C_BuildResponse,
 			Data:  data,

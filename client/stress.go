@@ -16,7 +16,6 @@ var (
 	clientCount  = flag.Int("clients", 100, "Number of concurrent clients")
 	requestCount = flag.Int("requests", 10, "Requests per client")
 	rampUpTime   = flag.Int("rampup", 5, "Ramp up time in seconds")
-	timeout      = flag.Int("timeout", 30, "Request timeout in seconds")
 )
 
 // 统计信息
@@ -40,14 +39,12 @@ func main() {
 	fmt.Printf("  Clients:        %d\n", *clientCount)
 	fmt.Printf("  Requests/Client: %d\n", *requestCount)
 	fmt.Printf("  Ramp Up Time:   %ds\n", *rampUpTime)
-	fmt.Printf("  Timeout:        %ds\n", *timeout)
 	fmt.Println()
 	fmt.Println("Starting performance test...")
 	fmt.Println()
 
 	startTime = time.Now()
 
-	// 启动客户端
 	var wg sync.WaitGroup
 	clientResults := make(chan *ClientResult, *clientCount)
 
@@ -59,19 +56,16 @@ func main() {
 			clientResults <- result
 		}(i)
 
-		// 梯度启动（避免同时连接）
 		if *rampUpTime > 0 {
 			time.Sleep(time.Duration(*rampUpTime*1000/*clientCount*/) * time.Millisecond)
 		}
 	}
 
-	// 等待所有客户端完成
 	go func() {
 		wg.Wait()
 		close(clientResults)
 	}()
 
-	// 收集结果
 	var totalSuccess, totalFailed int
 	var totalLat int64
 	for result := range clientResults {
@@ -80,7 +74,6 @@ func main() {
 		totalLat += result.TotalLatency
 	}
 
-	// 打印统计
 	printStatistics(totalSuccess, totalFailed, totalLat)
 }
 
@@ -96,10 +89,8 @@ type ClientResult struct {
 func runClient(clientID int) *ClientResult {
 	result := &ClientResult{ClientID: clientID}
 
-	// 创建客户端
 	client := NewTestClient(*serverAddr)
 
-	// 连接服务器
 	if err := client.Connect(); err != nil {
 		log.Printf("[Client %d] Connection failed: %v", clientID, err)
 		result.Failed++
@@ -107,7 +98,6 @@ func runClient(clientID int) *ClientResult {
 	}
 	defer client.Close()
 
-	// 生成唯一用户名
 	username := fmt.Sprintf("loadtest_%d_%d", clientID, time.Now().UnixNano())
 	password := "password123"
 	email := fmt.Sprintf("test%d@example.com", clientID)
@@ -140,7 +130,7 @@ func runClient(clientID int) *ClientResult {
 		atomic.AddInt64(&successRequests, 1)
 	}
 
-	// 执行多个移动操作
+	// 移动测试
 	for i := 0; i < *requestCount; i++ {
 		start = time.Now()
 		x := rand.Int31n(1000)
@@ -158,8 +148,6 @@ func runClient(clientID int) *ClientResult {
 		}
 
 		atomic.AddInt64(&totalRequests, 1)
-
-		// 随机延迟
 		time.Sleep(time.Duration(rand.Intn(100)) * time.Millisecond)
 	}
 
@@ -199,17 +187,13 @@ func printStatistics(success, failed int, totalLatency int64) {
 	fmt.Println()
 	fmt.Printf("Throughput:      %.2f requests/second\n", float64(total)/elapsed.Seconds())
 	fmt.Printf("Avg Latency:     %dms\n", totalLatency/int64(total))
-	fmt.Printf("Min Latency:     ~%dms\n", totalLatency/int64(total)/2)
-	fmt.Printf("Max Latency:     ~%dms\n", totalLatency/int64(total)*3)
 	fmt.Println()
 
-	// 性能评级
 	rating := getPerformanceRating(float64(total)/elapsed.Seconds(), float64(totalLatency)/float64(total))
 	fmt.Printf("Performance Rating: %s\n", rating)
 	fmt.Println()
 }
 
-// getPerformanceRating 获取性能评级
 func getPerformanceRating(throughput, avgLatency float64) string {
 	if throughput > 1000 && avgLatency < 50 {
 		return "⭐⭐⭐⭐⭐ Excellent"

@@ -2,67 +2,19 @@ package main
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"sync"
 	"time"
+
+	"google.golang.org/protobuf/proto"
+	pb "slg-game/protocol"
 )
 
 const (
-	HeaderSize = 8 // msg_id(4) + msg_len(4)
+	HeaderSize = 12 // Magic(2) + Version(1) + Flags(1) + MsgID(4) + DataLen(4)
 )
-
-// Packet represents a network packet
-type Packet struct {
-	MsgID uint32
-	Data  []byte
-}
-
-// Encode serializes the packet
-func (p *Packet) Encode() []byte {
-	buf := make([]byte, HeaderSize+len(p.Data))
-	binary.LittleEndian.PutUint32(buf[0:4], p.MsgID)
-	binary.LittleEndian.PutUint32(buf[4:8], uint32(len(p.Data)))
-	copy(buf[8:], p.Data)
-	return buf
-}
-
-// Decode reads a packet from reader
-func Decode(reader io.Reader) (*Packet, error) {
-	header := make([]byte, HeaderSize)
-	if _, err := io.ReadFull(reader, header); err != nil {
-		return nil, err
-	}
-
-	msgID := binary.LittleEndian.Uint32(header[0:4])
-	msgLen := binary.LittleEndian.Uint32(header[4:8])
-
-	if msgLen > 1024*1024 {
-		return nil, ErrPacketTooLarge
-	}
-
-	data := make([]byte, msgLen)
-	if _, err := io.ReadFull(reader, data); err != nil {
-		return nil, err
-	}
-
-	return &Packet{
-		MsgID: msgID,
-		Data:  data,
-	}, nil
-}
-
-// MarshalJSON wraps JSON marshal
-func MarshalJSON(v interface{}) ([]byte, error) {
-	return json.Marshal(v)
-}
-
-// UnmarshalJSON wraps JSON unmarshal
-func UnmarshalJSON(data []byte, v interface{}) error {
-	return json.Unmarshal(data, v)
-}
 
 // Client TCP 客户端
 type Client struct {
@@ -75,6 +27,52 @@ type Client struct {
 	isClosed  bool
 	mutex     sync.Mutex
 	serverAddr string
+}
+
+// Packet 网络包
+type Packet struct {
+	MsgID uint32
+	Data  []byte
+}
+
+// Encode 编码
+func (p *Packet) Encode() []byte {
+	buf := make([]byte, HeaderSize+len(p.Data))
+
+	binary.BigEndian.PutUint16(buf[0:2], 0x534C) // "SL"
+	buf[2] = 1                                    // Version
+	buf[3] = 0                                    // Flags
+	binary.BigEndian.PutUint32(buf[4:8], p.MsgID)
+	binary.BigEndian.PutUint32(buf[8:12], uint32(len(p.Data)))
+
+	copy(buf[12:], p.Data)
+	return buf
+}
+
+// Decode 解码
+func Decode(reader io.Reader) (*Packet, error) {
+	header := make([]byte, HeaderSize)
+	if _, err := io.ReadFull(reader, header); err != nil {
+		return nil, err
+	}
+
+	magic := binary.BigEndian.Uint16(header[0:2])
+	if magic != 0x534C {
+		return nil, fmt.Errorf("invalid magic number")
+	}
+
+	msgID := binary.BigEndian.Uint32(header[4:8])
+	dataLen := binary.BigEndian.Uint32(header[8:12])
+
+	data := make([]byte, dataLen)
+	if _, err := io.ReadFull(reader, data); err != nil {
+		return nil, err
+	}
+
+	return &Packet{
+		MsgID: msgID,
+		Data:  data,
+	}, nil
 }
 
 // NewClient creates a new TCP client
@@ -98,7 +96,6 @@ func (c *Client) Connect() error {
 	c.reader = conn
 	c.writer = conn
 
-	// Start send and receive loops
 	go c.sendLoop()
 	go c.recvLoop()
 
@@ -143,7 +140,7 @@ func (c *Client) writePacket(packet *Packet) error {
 	defer c.mutex.Unlock()
 
 	if c.isClosed {
-		return ErrConnectionClosed
+		return fmt.Errorf("connection closed")
 	}
 
 	data := packet.Encode()
@@ -151,23 +148,23 @@ func (c *Client) writePacket(packet *Packet) error {
 	return err
 }
 
-// Send sends a packet to the server
-func (c *Client) Send(msgID uint32, data interface{}) error {
-	jsonData, err := MarshalJSON(data)
+// Send sends a protobuf message
+func (c *Client) Send(msgID uint32, msg proto.Message) error {
+	data, err := proto.Marshal(msg)
 	if err != nil {
 		return err
 	}
 
 	packet := &Packet{
 		MsgID: msgID,
-		Data:  jsonData,
+		Data:  data,
 	}
 
 	select {
 	case c.sendChan <- packet:
 		return nil
 	default:
-		return ErrSendQueueFull
+		return fmt.Errorf("send queue full")
 	}
 }
 
@@ -180,10 +177,19 @@ func (c *Client) RecvWithTimeout(timeout time.Duration) (*Packet, error) {
 	case packet := <-c.recvChan:
 		return packet, nil
 	case <-timer.C:
-		return nil, ErrTimeout
+		return nil, fmt.Errorf("timeout")
 	case <-c.closeChan:
-		return nil, ErrConnectionClosed
+		return nil, fmt.Errorf("connection closed")
 	}
+}
+
+// RecvProto receives and unmarshals a protobuf message
+func (c *Client) RecvProto(msg proto.Message, timeout time.Duration) error {
+	packet, err := c.RecvWithTimeout(timeout)
+	if err != nil {
+		return err
+	}
+	return proto.Unmarshal(packet.Data, msg)
 }
 
 // Close closes the connection
@@ -202,18 +208,11 @@ func (c *Client) Close() {
 	}
 }
 
-// IsConnected checks if the client is connected
-func (c *Client) IsConnected() bool {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	return !c.isClosed && c.conn != nil
-}
-
 // TestClient is a test client for the game server
 type TestClient struct {
-	client   *Client
-	playerId uint64
-	username string
+	client     *Client
+	playerId   uint64
+	username   string
 	isLoggedIn bool
 }
 
@@ -230,24 +229,19 @@ func (tc *TestClient) Connect() error {
 }
 
 // Register registers a new account
-func (tc *TestClient) Register(username, password, email string) (*S2C_RegisterResponse, error) {
-	req := &C2S_RegisterRequest{
+func (tc *TestClient) Register(username, password, email string) (*pb.S2C_RegisterResponse, error) {
+	req := &pb.C2S_RegisterRequest{
 		Username: username,
 		Password: password,
 		Email:    email,
 	}
 
-	if err := tc.client.Send(MsgID_C2S_RegisterRequest, req); err != nil {
+	if err := tc.client.Send(1002, req); err != nil {
 		return nil, err
 	}
 
-	packet, err := tc.client.RecvWithTimeout(10 * time.Second)
-	if err != nil {
-		return nil, err
-	}
-
-	var resp S2C_RegisterResponse
-	if err := json.Unmarshal(packet.Data, &resp); err != nil {
+	resp := &pb.S2C_RegisterResponse{}
+	if err := tc.client.RecvProto(resp, 10*time.Second); err != nil {
 		return nil, err
 	}
 
@@ -256,27 +250,22 @@ func (tc *TestClient) Register(username, password, email string) (*S2C_RegisterR
 		tc.username = username
 	}
 
-	return &resp, nil
+	return resp, nil
 }
 
 // Login logs in to the server
-func (tc *TestClient) Login(username, password string) (*S2C_LoginResponse, error) {
-	req := &C2S_LoginRequest{
+func (tc *TestClient) Login(username, password string) (*pb.S2C_LoginResponse, error) {
+	req := &pb.C2S_LoginRequest{
 		Username: username,
 		Password: password,
 	}
 
-	if err := tc.client.Send(MsgID_C2S_LoginRequest, req); err != nil {
+	if err := tc.client.Send(1001, req); err != nil {
 		return nil, err
 	}
 
-	packet, err := tc.client.RecvWithTimeout(10 * time.Second)
-	if err != nil {
-		return nil, err
-	}
-
-	var resp S2C_LoginResponse
-	if err := json.Unmarshal(packet.Data, &resp); err != nil {
+	resp := &pb.S2C_LoginResponse{}
+	if err := tc.client.RecvProto(resp, 10*time.Second); err != nil {
 		return nil, err
 	}
 
@@ -286,88 +275,54 @@ func (tc *TestClient) Login(username, password string) (*S2C_LoginResponse, erro
 		tc.isLoggedIn = true
 	}
 
-	return &resp, nil
+	return resp, nil
 }
 
 // Move sends a move request
-func (tc *TestClient) Move(x, y int32) (*S2C_MoveResponse, error) {
+func (tc *TestClient) Move(x, y int32) (*pb.S2C_MoveResponse, error) {
 	if !tc.isLoggedIn {
 		return nil, fmt.Errorf("not logged in")
 	}
 
-	req := &C2S_MoveRequest{X: x, Y: y}
+	req := &pb.C2S_MoveRequest{X: x, Y: y}
 
-	if err := tc.client.Send(MsgID_C2S_MoveRequest, req); err != nil {
+	if err := tc.client.Send(1003, req); err != nil {
 		return nil, err
 	}
 
-	packet, err := tc.client.RecvWithTimeout(10 * time.Second)
-	if err != nil {
+	resp := &pb.S2C_MoveResponse{}
+	if err := tc.client.RecvProto(resp, 10*time.Second); err != nil {
 		return nil, err
 	}
 
-	var resp S2C_MoveResponse
-	if err := json.Unmarshal(packet.Data, &resp); err != nil {
-		return nil, err
-	}
-
-	return &resp, nil
+	return resp, nil
 }
 
 // Build sends a build request
-func (tc *TestClient) Build(buildingType string, x, y int32) (*S2C_BuildResponse, error) {
+func (tc *TestClient) Build(buildingType string, x, y int32) (*pb.S2C_BuildResponse, error) {
 	if !tc.isLoggedIn {
 		return nil, fmt.Errorf("not logged in")
 	}
 
-	req := &C2S_BuildRequest{
+	req := &pb.C2S_BuildRequest{
 		BuildingType: buildingType,
 		X:            x,
 		Y:            y,
 	}
 
-	if err := tc.client.Send(MsgID_C2S_BuildRequest, req); err != nil {
+	if err := tc.client.Send(1004, req); err != nil {
 		return nil, err
 	}
 
-	packet, err := tc.client.RecvWithTimeout(10 * time.Second)
-	if err != nil {
+	resp := &pb.S2C_BuildResponse{}
+	if err := tc.client.RecvProto(resp, 10*time.Second); err != nil {
 		return nil, err
 	}
 
-	var resp S2C_BuildResponse
-	if err := json.Unmarshal(packet.Data, &resp); err != nil {
-		return nil, err
-	}
-
-	return &resp, nil
+	return resp, nil
 }
 
 // Close closes the connection
 func (tc *TestClient) Close() {
 	tc.client.Close()
-}
-
-// Errors
-var (
-	ErrPacketTooLarge = &PacketError{"packet too large"}
-	ErrConnectionClosed = &PacketError{"connection closed"}
-	ErrSendQueueFull = &ClientError{"send queue full"}
-	ErrTimeout = &ClientError{"timeout"}
-)
-
-type PacketError struct {
-	Message string
-}
-
-func (e *PacketError) Error() string {
-	return e.Message
-}
-
-type ClientError struct {
-	Message string
-}
-
-func (e *ClientError) Error() string {
-	return e.Message
 }

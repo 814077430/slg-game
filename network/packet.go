@@ -2,44 +2,60 @@ package network
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"io"
+
+	"slg-game/protocol"
 )
 
 const (
-	HeaderSize = 8 // msg_id(4) + msg_len(4)
+	HeaderSize = 12 // Magic(2) + Version(1) + Flags(1) + MsgID(4) + DataLen(4)
 )
 
-// Packet represents a complete network packet with header and payload
+// Packet represents a network packet
 type Packet struct {
 	MsgID uint32
 	Data  []byte
 }
 
-// Encode serializes the packet into bytes
+// Encode serializes the packet with protobuf header
 func (p *Packet) Encode() []byte {
 	buf := make([]byte, HeaderSize+len(p.Data))
-	binary.LittleEndian.PutUint32(buf[0:4], p.MsgID)
-	binary.LittleEndian.PutUint32(buf[4:8], uint32(len(p.Data)))
-	copy(buf[8:], p.Data)
+
+	binary.BigEndian.PutUint16(buf[0:2], protocol.MagicNumber)
+	buf[2] = protocol.ProtocolVersion
+	buf[3] = 0 // Flags
+	binary.BigEndian.PutUint32(buf[4:8], p.MsgID)
+	binary.BigEndian.PutUint32(buf[8:12], uint32(len(p.Data)))
+
+	copy(buf[12:], p.Data)
 	return buf
 }
 
-// Decode reads a packet from the reader
+// Decode reads a packet from reader
 func Decode(reader io.Reader) (*Packet, error) {
 	header := make([]byte, HeaderSize)
 	if _, err := io.ReadFull(reader, header); err != nil {
 		return nil, err
 	}
 
-	msgID := binary.LittleEndian.Uint32(header[0:4])
-	msgLen := binary.LittleEndian.Uint32(header[4:8])
-
-	if msgLen > 1024*1024 { // 1MB limit
-		return nil, ErrPacketTooLarge
+	magic := binary.BigEndian.Uint16(header[0:2])
+	if magic != protocol.MagicNumber {
+		return nil, protocol.ErrInvalidMagic
 	}
 
-	data := make([]byte, msgLen)
+	version := header[2]
+	if version != protocol.ProtocolVersion {
+		return nil, protocol.ErrInvalidVersion
+	}
+
+	msgID := binary.BigEndian.Uint32(header[4:8])
+	dataLen := binary.BigEndian.Uint32(header[8:12])
+
+	if dataLen > protocol.MaxMessageSize {
+		return nil, protocol.ErrMessageTooLarge
+	}
+
+	data := make([]byte, dataLen)
 	if _, err := io.ReadFull(reader, data); err != nil {
 		return nil, err
 	}
@@ -48,26 +64,4 @@ func Decode(reader io.Reader) (*Packet, error) {
 		MsgID: msgID,
 		Data:  data,
 	}, nil
-}
-
-// MarshalJSON 封装 JSON 序列化
-func MarshalJSON(v interface{}) ([]byte, error) {
-	return json.Marshal(v)
-}
-
-// UnmarshalJSON 封装 JSON 反序列化
-func UnmarshalJSON(data []byte, v interface{}) error {
-	return json.Unmarshal(data, v)
-}
-
-var (
-	ErrPacketTooLarge = &PacketError{"packet too large"}
-)
-
-type PacketError struct {
-	Message string
-}
-
-func (e *PacketError) Error() string {
-	return e.Message
 }
