@@ -1,24 +1,93 @@
 package database
 
-// 注意：MongoDB 代码已屏蔽，使用内存数据库
-// 如需启用 MongoDB，取消下方注释并安装 MongoDB
-
-/*
 import (
 	"context"
-	"log"
+	"sync"
 	"time"
 
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-type Database struct {
+// DB 数据库接口
+type DB interface {
+	GetCollection(name string) Collection
+	Disconnect() error
+}
+
+// Collection 集合接口
+type Collection interface {
+	FindOne(filter map[string]interface{}) (map[string]interface{}, error)
+	InsertOne(doc map[string]interface{}) error
+	UpdateOne(filter, update map[string]interface{}) error
+	CountDocuments(filter map[string]interface{}) (int64, error)
+	GetAll() []map[string]interface{}
+}
+
+// MemoryDB 内存数据库实现
+type MemoryDB struct {
+	collections map[string]*MemoryCollection
+	mutex       sync.RWMutex
+}
+
+// MemoryCollection 内存集合
+type MemoryCollection struct {
+	name  string
+	data  []map[string]interface{}
+	mutex sync.RWMutex
+	idGen uint64
+}
+
+// MongoDatabase MongoDB 实现
+type MongoDatabase struct {
 	client *mongo.Client
 	db     *mongo.Database
 }
 
-func InitMongoDB(uri, dbName string) (*Database, error) {
+// MongoCollection MongoDB 集合实现
+type MongoCollection struct {
+	collection *mongo.Collection
+}
+
+// NewMemoryDB 创建内存数据库
+func NewMemoryDB() *MemoryDB {
+	return &MemoryDB{
+		collections: make(map[string]*MemoryCollection),
+	}
+}
+
+func (m *MemoryDB) GetCollection(name string) Collection {
+	m.mutex.RLock()
+	collection, exists := m.collections[name]
+	m.mutex.RUnlock()
+
+	if exists {
+		return collection
+	}
+
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	if collection, exists = m.collections[name]; exists {
+		return collection
+	}
+
+	collection = &MemoryCollection{
+		name:  name,
+		data:  make([]map[string]interface{}, 0),
+		idGen: 0,
+	}
+	m.collections[name] = collection
+	return collection
+}
+
+func (m *MemoryDB) Disconnect() error {
+	return nil
+}
+
+// InitMongoDB 初始化 MongoDB 连接
+func InitMongoDB(uri, dbName string) (*MongoDatabase, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -27,38 +96,154 @@ func InitMongoDB(uri, dbName string) (*Database, error) {
 		return nil, err
 	}
 
-	// 测试连接
 	if err = client.Ping(ctx, nil); err != nil {
 		client.Disconnect(ctx)
 		return nil, err
 	}
 
-	log.Println("Connected to MongoDB successfully")
-	return &Database{
+	return &MongoDatabase{
 		client: client,
 		db:     client.Database(dbName),
 	}, nil
 }
 
-func (d *Database) GetCollection(collectionName string) *mongo.Collection {
-	return d.db.Collection(collectionName)
+func (m *MongoDatabase) GetCollection(name string) Collection {
+	return &MongoCollection{collection: m.db.Collection(name)}
 }
 
-func (d *Database) Client() *mongo.Client {
-	return d.client
-}
-
-func (d *Database) Disconnect() error {
+func (m *MongoDatabase) Disconnect() error {
+	if m.client == nil {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return d.client.Disconnect(ctx)
+	return m.client.Disconnect(ctx)
 }
-*/
 
-// 使用内存数据库
-type Database = MemoryDB
+// MemoryCollection 方法实现
+func (c *MemoryCollection) FindOne(filter map[string]interface{}) (map[string]interface{}, error) {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
 
-// InitMongoDB 返回内存数据库（屏蔽 MongoDB）
-func InitMongoDB(uri, dbName string) (*MemoryDB, error) {
-	return NewMemoryDB(), nil
+	for _, doc := range c.data {
+		match := true
+		for k, v := range filter {
+			if doc[k] != v {
+				match = false
+				break
+			}
+		}
+		if match {
+			result := make(map[string]interface{})
+			for k, v := range doc {
+				result[k] = v
+			}
+			return result, nil
+		}
+	}
+	return nil, nil
+}
+
+func (c *MemoryCollection) InsertOne(doc map[string]interface{}) error {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	c.idGen++
+	doc["_id"] = c.idGen
+	doc["id"] = c.idGen
+	c.data = append(c.data, doc)
+	return nil
+}
+
+func (c *MemoryCollection) UpdateOne(filter, update map[string]interface{}) error {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	for i, doc := range c.data {
+		match := true
+		for k, v := range filter {
+			if doc[k] != v {
+				match = false
+				break
+			}
+		}
+		if match {
+			for k, v := range update {
+				c.data[i][k] = v
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+func (c *MemoryCollection) CountDocuments(filter map[string]interface{}) (int64, error) {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+
+	count := int64(0)
+	for _, doc := range c.data {
+		match := true
+		for k, v := range filter {
+			if doc[k] != v {
+				match = false
+				break
+			}
+		}
+		if match {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (c *MemoryCollection) GetAll() []map[string]interface{} {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+
+	results := make([]map[string]interface{}, len(c.data))
+	for i, doc := range c.data {
+		result := make(map[string]interface{})
+		for k, v := range doc {
+			result[k] = v
+		}
+		results[i] = result
+	}
+	return results
+}
+
+// MongoCollection 方法实现
+func (c *MongoCollection) FindOne(filter map[string]interface{}) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.collection.FindOne(context.Background(), filter).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (c *MongoCollection) InsertOne(doc map[string]interface{}) error {
+	_, err := c.collection.InsertOne(context.Background(), doc)
+	return err
+}
+
+func (c *MongoCollection) UpdateOne(filter, update map[string]interface{}) error {
+	_, err := c.collection.UpdateOne(context.Background(), filter, bson.M{"$set": update})
+	return err
+}
+
+func (c *MongoCollection) CountDocuments(filter map[string]interface{}) (int64, error) {
+	return c.collection.CountDocuments(context.Background(), filter)
+}
+
+func (c *MongoCollection) GetAll() []map[string]interface{} {
+	cursor, err := c.collection.Find(context.Background(), bson.M{})
+	if err != nil {
+		return nil
+	}
+	var results []map[string]interface{}
+	if err := cursor.All(context.Background(), &results); err != nil {
+		return nil
+	}
+	return results
 }

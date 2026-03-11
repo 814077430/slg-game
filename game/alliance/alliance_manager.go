@@ -9,11 +9,11 @@ import (
 
 // AllianceManager 联盟管理器（简化版）
 type AllianceManager struct {
-	db *database.MemoryDB
+	db database.DB
 }
 
 // NewAllianceManager 创建联盟管理器
-func NewAllianceManager(db *database.MemoryDB) *AllianceManager {
+func NewAllianceManager(db database.DB) *AllianceManager {
 	return &AllianceManager{db: db}
 }
 

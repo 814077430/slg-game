@@ -51,10 +51,10 @@ type Construction struct {
 
 // BuildingManager 建筑管理器
 type BuildingManager struct {
-	db *database.MemoryDB
+	db database.DB
 }
 
-func NewBuildingManager(db *database.MemoryDB) *BuildingManager {
+func NewBuildingManager(db database.DB) *BuildingManager {
 	return &BuildingManager{db: db}
 }
 

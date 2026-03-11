@@ -26,10 +26,10 @@ const (
 
 type MessageRouter struct {
 	handlers map[uint32]func(*PlayerSession, []byte) *network.Packet
-	db       *database.MemoryDB
+	db       database.DB
 }
 
-func NewMessageRouter(db *database.MemoryDB) *MessageRouter {
+func NewMessageRouter(db database.DB) *MessageRouter {
 	router := &MessageRouter{
 		handlers: make(map[uint32]func(*PlayerSession, []byte) *network.Packet),
 		db:       db,

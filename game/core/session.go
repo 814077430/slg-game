@@ -12,7 +12,7 @@ import (
 
 type PlayerSession struct {
 	connection  *network.Connection
-	db          *database.MemoryDB
+	db          database.DB
 	config      *config.Config
 	playerID    uint64
 	username    string
@@ -22,7 +22,7 @@ type PlayerSession struct {
 	mutex       sync.RWMutex
 }
 
-func NewPlayerSession(conn *network.Connection, db *database.MemoryDB, config *config.Config) *PlayerSession {
+func NewPlayerSession(conn *network.Connection, db database.DB, config *config.Config) *PlayerSession {
 	return &PlayerSession{
 		connection: conn,
 		db:         db,

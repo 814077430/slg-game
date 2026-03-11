@@ -11,7 +11,7 @@ import (
 
 // World represents the game world with all tiles and players
 type World struct {
-	db          *database.MemoryDB
+	db          database.DB
 	tiles       map[WorldCoord]*WorldTile
 	players     map[uint64]map[string]interface{}
 	mutex       sync.RWMutex
@@ -35,7 +35,7 @@ type WorldTile struct {
 }
 
 // NewWorld creates a new world instance
-func NewWorld(db *database.MemoryDB) *World {
+func NewWorld(db database.DB) *World {
 	world := &World{
 		db:          db,
 		tiles:       make(map[WorldCoord]*WorldTile),

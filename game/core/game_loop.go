@@ -11,7 +11,7 @@ import (
 
 // GameLoop 游戏主循环
 type GameLoop struct {
-	db            *database.MemoryDB
+	db            database.DB
 	tickInterval  time.Duration
 	tickCount     uint64
 	stopChan      chan struct{}
@@ -20,7 +20,7 @@ type GameLoop struct {
 }
 
 // NewGameLoop 创建游戏主循环
-func NewGameLoop(db *database.MemoryDB, tickInterval time.Duration, world *world.World) *GameLoop {
+func NewGameLoop(db database.DB, tickInterval time.Duration, world *world.World) *GameLoop {
 	return &GameLoop{
 		db:           db,
 		tickInterval: tickInterval,

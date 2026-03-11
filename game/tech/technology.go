@@ -24,11 +24,11 @@ type Technology struct {
 
 // TechnologyManager 科技管理器（简化版）
 type TechnologyManager struct {
-	db *database.MemoryDB
+	db database.DB
 }
 
 // NewTechnologyManager 创建科技管理器
-func NewTechnologyManager(db *database.MemoryDB) *TechnologyManager {
+func NewTechnologyManager(db database.DB) *TechnologyManager {
 	return &TechnologyManager{db: db}
 }
 

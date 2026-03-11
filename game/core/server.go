@@ -17,7 +17,7 @@ import (
 )
 
 type GameServer struct {
-	db       *database.MemoryDB
+	db       database.DB
 	config   *config.Config
 	router   *MessageRouter
 	gameLoop *GameLoop
@@ -31,12 +31,13 @@ type GameServer struct {
 	techMgr      *tech.TechnologyManager
 }
 
-func NewGameServer(db *database.MemoryDB, cfg *config.Config) *GameServer {
+func NewGameServer(db database.DB, cfg *config.Config) *GameServer {
 	// 创建消息路由器
 	router := NewMessageRouter(db)
 
-	// 创建世界实例
-	world := world.NewWorld(db)
+	// 创建世界实例（世界模块使用内存模式）
+	memDB := database.NewMemoryDB()
+	world := world.NewWorld(memDB)
 
 	// 创建游戏主循环
 	tickInterval := time.Duration(cfg.Game.TickInterval) * time.Millisecond

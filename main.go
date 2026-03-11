@@ -25,8 +25,21 @@ func main() {
 	}
 	log.Info("✓ Config loaded")
 
-	db := database.NewMemoryDB()
-	log.Info("✓ Memory database initialized (MongoDB disabled)")
+	// 使用 MongoDB（数据持久化）
+	var db database.DB
+	mongoDB, err := database.InitMongoDB("mongodb://localhost:27017", "slg_game")
+	if err != nil {
+		log.Warnf("MongoDB connection failed: %v", err)
+		log.Warn("Falling back to memory database")
+		db = database.NewMemoryDB()
+		log.Info("✓ Memory database initialized")
+	} else {
+		db = mongoDB
+		log.Info("✓ MongoDB connected successfully")
+		log.Info("  Database: slg_game")
+		log.Info("  Data will be persisted across restarts")
+	}
+	defer db.Disconnect()
 
 	gameServer := core.NewGameServer(db, cfg)
 	log.Info("✓ Game server initialized")

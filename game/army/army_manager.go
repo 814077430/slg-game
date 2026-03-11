@@ -9,11 +9,11 @@ import (
 
 // ArmyManager 军队管理器（简化版）
 type ArmyManager struct {
-	db *database.MemoryDB
+	db database.DB
 }
 
 // NewArmyManager 创建军队管理器
-func NewArmyManager(db *database.MemoryDB) *ArmyManager {
+func NewArmyManager(db database.DB) *ArmyManager {
 	return &ArmyManager{db: db}
 }
 

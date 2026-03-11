@@ -21,11 +21,11 @@ const (
 
 // ResourceManager 资源管理器
 type ResourceManager struct {
-	db *database.MemoryDB
+	db database.DB
 }
 
 // NewResourceManager 创建资源管理器
-func NewResourceManager(db *database.MemoryDB) *ResourceManager {
+func NewResourceManager(db database.DB) *ResourceManager {
 	return &ResourceManager{db: db}
 }
 
