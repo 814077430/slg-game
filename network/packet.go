@@ -2,6 +2,7 @@ package network
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"io"
 )
 
@@ -47,6 +48,16 @@ func Decode(reader io.Reader) (*Packet, error) {
 		MsgID: msgID,
 		Data:  data,
 	}, nil
+}
+
+// MarshalJSON 封装 JSON 序列化
+func MarshalJSON(v interface{}) ([]byte, error) {
+	return json.Marshal(v)
+}
+
+// UnmarshalJSON 封装 JSON 反序列化
+func UnmarshalJSON(data []byte, v interface{}) error {
+	return json.Unmarshal(data, v)
 }
 
 var (

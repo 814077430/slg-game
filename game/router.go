@@ -11,20 +11,19 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"slg-game/database"
 	"slg-game/network"
-	pb "slg-game/proto"
-	"google.golang.org/protobuf/proto"
+	"slg-game/proto"
 )
 
 const (
-	MsgID_C2S_LoginRequest   = 1001
+	MsgID_C2S_LoginRequest    = 1001
 	MsgID_C2S_RegisterRequest = 1002
-	MsgID_C2S_MoveRequest    = 1002
-	MsgID_C2S_BuildRequest   = 1003
-	MsgID_S2C_LoginResponse  = 2001
+	MsgID_C2S_MoveRequest     = 1003
+	MsgID_C2S_BuildRequest    = 1004
+	MsgID_S2C_LoginResponse   = 2001
 	MsgID_S2C_RegisterResponse = 2002
-	MsgID_S2C_MoveResponse   = 2002
-	MsgID_S2C_BuildResponse  = 2003
-	MsgID_S2C_PlayerUpdate   = 2004
+	MsgID_S2C_MoveResponse    = 2003
+	MsgID_S2C_BuildResponse   = 2004
+	MsgID_S2C_PlayerUpdate    = 2005
 )
 
 type MessageRouter struct {
@@ -66,8 +65,8 @@ func hashPassword(password string) string {
 
 // handleLoginRequest 处理登录请求
 func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte) *network.Packet {
-	request := &pb.C2S_LoginRequest{}
-	if err := proto.Unmarshal(data, request); err != nil {
+	request := &proto.C2S_LoginRequest{}
+	if err := network.UnmarshalJSON(data, request); err != nil {
 		log.Printf("Failed to unmarshal login request: %v", err)
 		return createLoginErrorResponse("Invalid login request")
 	}
@@ -104,7 +103,7 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 	session.SetLoggedIn(true)
 
 	// 构建玩家数据响应
-	playerData := &pb.PlayerData{
+	playerData := &proto.PlayerData{
 		PlayerId:   player.PlayerID,
 		Username:   player.Username,
 		Email:      player.Email,
@@ -123,8 +122,8 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 
 	// 转换建筑数据
 	for _, b := range player.Buildings {
-		playerData.Buildings = append(playerData.Buildings, &pb.Building{
-			BuildingId:   player.PlayerID, // 使用玩家 ID 作为临时建筑 ID
+		playerData.Buildings = append(playerData.Buildings, &proto.Building{
+			BuildingId:   player.PlayerID,
 			BuildingType: b.Type,
 			Level:        b.Level,
 			X:            b.X,
@@ -132,14 +131,14 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 		})
 	}
 
-	response := &pb.S2C_LoginResponse{
-		Success:     true,
-		Message:     "Login successful",
-		PlayerId:    player.PlayerID,
-		PlayerData:  playerData,
+	response := &proto.S2C_LoginResponse{
+		Success:    true,
+		Message:    "Login successful",
+		PlayerId:   player.PlayerID,
+		PlayerData: playerData,
 	}
 
-	responseData, err := proto.Marshal(response)
+	responseData, err := network.MarshalJSON(response)
 	if err != nil {
 		log.Printf("Failed to marshal login response: %v", err)
 		return createLoginErrorResponse("Internal error")
@@ -155,8 +154,8 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 
 // handleRegisterRequest 处理注册请求
 func (mr *MessageRouter) handleRegisterRequest(session *PlayerSession, data []byte) *network.Packet {
-	request := &pb.C2S_RegisterRequest{}
-	if err := proto.Unmarshal(data, request); err != nil {
+	request := &proto.C2S_RegisterRequest{}
+	if err := network.UnmarshalJSON(data, request); err != nil {
 		log.Printf("Failed to unmarshal register request: %v", err)
 		return createRegisterErrorResponse("Invalid register request")
 	}
@@ -202,10 +201,10 @@ func (mr *MessageRouter) handleRegisterRequest(session *PlayerSession, data []by
 		Troops:       []database.Troop{},
 		Research:     make(map[string]int32),
 		Settings: database.PlayerSettings{
-			Language:     "zh-CN",
+			Language:      "zh-CN",
 			Notifications: true,
-			SoundEnabled: true,
-			MusicEnabled: true,
+			SoundEnabled:  true,
+			MusicEnabled:  true,
 		},
 	}
 
@@ -220,13 +219,13 @@ func (mr *MessageRouter) handleRegisterRequest(session *PlayerSession, data []by
 	session.SetUsername(newPlayer.Username)
 	session.SetLoggedIn(true)
 
-	response := &pb.S2C_RegisterResponse{
+	response := &proto.S2C_RegisterResponse{
 		Success:  true,
 		Message:  "Registration successful",
 		PlayerId: newPlayer.PlayerID,
 	}
 
-	responseData, err := proto.Marshal(response)
+	responseData, err := network.MarshalJSON(response)
 	if err != nil {
 		log.Printf("Failed to marshal register response: %v", err)
 		return createRegisterErrorResponse("Internal error")
@@ -246,24 +245,35 @@ func (mr *MessageRouter) handleMoveRequest(session *PlayerSession, data []byte) 
 		return createMoveErrorResponse("Not logged in")
 	}
 
-	request := &pb.C2S_MoveRequest{}
-	if err := proto.Unmarshal(data, request); err != nil {
+	request := &proto.C2S_MoveRequest{}
+	if err := network.UnmarshalJSON(data, request); err != nil {
 		log.Printf("Failed to unmarshal move request: %v", err)
 		return createMoveErrorResponse("Invalid move request")
 	}
 
-	// TODO: 验证移动坐标是否在地图范围内
-	// TODO: 更新玩家位置
-	// TODO: 保存到数据库
+	playerID := session.GetPlayerID()
 
-	response := &pb.S2C_MoveResponse{
+	// 更新玩家位置
+	collection := mr.db.GetCollection("players")
+	_, err := collection.UpdateOne(
+		context.Background(),
+		bson.M{"player_id": playerID},
+		bson.M{"$set": bson.M{"x": request.X, "y": request.Y}},
+	)
+
+	if err != nil {
+		log.Printf("Failed to update player position: %v", err)
+		return createMoveErrorResponse("Failed to update position")
+	}
+
+	response := &proto.S2C_MoveResponse{
 		Success: true,
 		Message: "Move successful",
 		X:       request.X,
 		Y:       request.Y,
 	}
 
-	responseData, err := proto.Marshal(response)
+	responseData, err := network.MarshalJSON(response)
 	if err != nil {
 		log.Printf("Failed to marshal move response: %v", err)
 		return createMoveErrorResponse("Internal error")
@@ -281,22 +291,22 @@ func (mr *MessageRouter) handleBuildRequest(session *PlayerSession, data []byte)
 		return createBuildErrorResponse("Not logged in")
 	}
 
-	request := &pb.C2S_BuildRequest{}
-	if err := proto.Unmarshal(data, request); err != nil {
+	request := &proto.C2S_BuildRequest{}
+	if err := network.UnmarshalJSON(data, request); err != nil {
 		log.Printf("Failed to unmarshal build request: %v", err)
 		return createBuildErrorResponse("Invalid build request")
 	}
 
-	// TODO: 验证建筑类型和位置
+	_ = session.GetPlayerID() // TODO: 用于后续资源检查
+
 	// TODO: 检查资源是否足够
 	// TODO: 扣除资源
 	// TODO: 创建建筑
-	// TODO: 保存到数据库
 
-	response := &pb.S2C_BuildResponse{
+	response := &proto.S2C_BuildResponse{
 		Success: true,
-		Message: "Build successful",
-		Building: &pb.Building{
+		Message: "Build request received",
+		Building: &proto.Building{
 			BuildingType: request.BuildingType,
 			X:            request.X,
 			Y:            request.Y,
@@ -304,7 +314,7 @@ func (mr *MessageRouter) handleBuildRequest(session *PlayerSession, data []byte)
 		},
 	}
 
-	responseData, err := proto.Marshal(response)
+	responseData, err := network.MarshalJSON(response)
 	if err != nil {
 		log.Printf("Failed to marshal build response: %v", err)
 		return createBuildErrorResponse("Internal error")
@@ -318,11 +328,11 @@ func (mr *MessageRouter) handleBuildRequest(session *PlayerSession, data []byte)
 
 // 错误响应辅助函数
 func createLoginErrorResponse(message string) *network.Packet {
-	response := &pb.S2C_LoginResponse{
+	response := &proto.S2C_LoginResponse{
 		Success: false,
 		Message: message,
 	}
-	if data, err := proto.Marshal(response); err == nil {
+	if data, err := network.MarshalJSON(response); err == nil {
 		return &network.Packet{
 			MsgID: MsgID_S2C_LoginResponse,
 			Data:  data,
@@ -332,11 +342,11 @@ func createLoginErrorResponse(message string) *network.Packet {
 }
 
 func createRegisterErrorResponse(message string) *network.Packet {
-	response := &pb.S2C_RegisterResponse{
+	response := &proto.S2C_RegisterResponse{
 		Success: false,
 		Message: message,
 	}
-	if data, err := proto.Marshal(response); err == nil {
+	if data, err := network.MarshalJSON(response); err == nil {
 		return &network.Packet{
 			MsgID: MsgID_S2C_RegisterResponse,
 			Data:  data,
@@ -346,11 +356,11 @@ func createRegisterErrorResponse(message string) *network.Packet {
 }
 
 func createMoveErrorResponse(message string) *network.Packet {
-	response := &pb.S2C_MoveResponse{
+	response := &proto.S2C_MoveResponse{
 		Success: false,
 		Message: message,
 	}
-	if data, err := proto.Marshal(response); err == nil {
+	if data, err := network.MarshalJSON(response); err == nil {
 		return &network.Packet{
 			MsgID: MsgID_S2C_MoveResponse,
 			Data:  data,
@@ -360,11 +370,11 @@ func createMoveErrorResponse(message string) *network.Packet {
 }
 
 func createBuildErrorResponse(message string) *network.Packet {
-	response := &pb.S2C_BuildResponse{
+	response := &proto.S2C_BuildResponse{
 		Success: false,
 		Message: message,
 	}
-	if data, err := proto.Marshal(response); err == nil {
+	if data, err := network.MarshalJSON(response); err == nil {
 		return &network.Packet{
 			MsgID: MsgID_S2C_BuildResponse,
 			Data:  data,
