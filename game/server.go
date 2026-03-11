@@ -2,6 +2,8 @@ package game
 
 import (
 	"log"
+	"net"
+	"time"
 
 	"slg-game/config"
 	"slg-game/database"
@@ -12,13 +14,25 @@ type GameServer struct {
 	db     *database.Database
 	config *config.Config
 	router *MessageRouter
+	world  *World
 }
 
-func NewGameServer(db *database.Database, config *config.Config) *GameServer {
+func NewGameServer(db *database.Database, cfg *config.Config) *GameServer {
+	// 创建消息路由器
+	router := NewMessageRouter(db)
+
+	// 创建世界实例
+	world := NewWorld(db)
+
+	// 启动游戏主循环
+	tickInterval := time.Duration(cfg.Game.TickInterval) * time.Millisecond
+	world.StartGameLoop(tickInterval)
+
 	return &GameServer{
 		db:     db,
-		config: config,
-		router: NewMessageRouter(),
+		config: cfg,
+		router: router,
+		world:  world,
 	}
 }
 
@@ -52,4 +66,12 @@ func (gs *GameServer) HandleClient(conn net.Conn) {
 
 	session.Cleanup()
 	log.Printf("Client disconnected: %s", conn.RemoteAddr())
+}
+
+// Shutdown 优雅关闭服务器
+func (gs *GameServer) Shutdown() {
+	if gs.world != nil {
+		gs.world.StopGameLoop()
+	}
+	log.Println("Game server shutdown complete")
 }

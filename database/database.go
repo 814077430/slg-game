@@ -39,6 +39,10 @@ func (d *Database) GetCollection(collectionName string) *mongo.Collection {
 	return d.db.Collection(collectionName)
 }
 
+func (d *Database) Client() *mongo.Client {
+	return d.client
+}
+
 func (d *Database) Disconnect() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
