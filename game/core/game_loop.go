@@ -6,26 +6,23 @@ import (
 	"time"
 
 	"slg-game/database"
-	"slg-game/game/world"
 )
 
-// GameLoop 游戏主循环
+// GameLoop 游戏主循环（不包含 World）
 type GameLoop struct {
 	db            database.DB
 	tickInterval  time.Duration
 	tickCount     uint64
 	stopChan      chan struct{}
 	wg            sync.WaitGroup
-	world         *world.World
 }
 
 // NewGameLoop 创建游戏主循环
-func NewGameLoop(db database.DB, tickInterval time.Duration, world *world.World) *GameLoop {
+func NewGameLoop(db database.DB, tickInterval time.Duration) *GameLoop {
 	return &GameLoop{
 		db:           db,
 		tickInterval: tickInterval,
 		stopChan:     make(chan struct{}),
-		world:        world,
 	}
 }
 
@@ -37,14 +34,14 @@ func (gl *GameLoop) Start() {
 		ticker := time.NewTicker(gl.tickInterval)
 		defer ticker.Stop()
 
-		log.Printf("Game loop started with tick interval: %v", gl.tickInterval)
+		log.Printf("[GameLoop] Game loop started with tick interval: %v", gl.tickInterval)
 
 		for {
 			select {
 			case <-ticker.C:
 				gl.tick()
 			case <-gl.stopChan:
-				log.Println("Game loop stopping...")
+				log.Println("[GameLoop] Game loop stopping...")
 				return
 			}
 		}
@@ -55,7 +52,7 @@ func (gl *GameLoop) Start() {
 func (gl *GameLoop) Stop() {
 	close(gl.stopChan)
 	gl.wg.Wait()
-	log.Println("Game loop stopped")
+	log.Println("[GameLoop] Game loop stopped")
 }
 
 // tick 执行一个游戏 tick
@@ -64,7 +61,7 @@ func (gl *GameLoop) tick() {
 
 	// 每 10 个 tick 记录一次状态
 	if gl.tickCount%10 == 0 {
-		log.Printf("Game tick: %d", gl.tickCount)
+		log.Printf("[GameLoop] Tick: %d", gl.tickCount)
 	}
 
 	// 处理建筑建造完成
@@ -76,10 +73,7 @@ func (gl *GameLoop) tick() {
 	// 处理军队移动
 	gl.processArmyMovement()
 
-	// 更新世界状态
-	if gl.world != nil {
-		gl.world.Tick()
-	}
+	// 注意：World 模块现在有自己独立的循环，不在这里调用
 }
 
 // processBuildingCompletion 处理建筑建造完成

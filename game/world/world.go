@@ -11,12 +11,14 @@ import (
 
 // World represents the game world with all tiles and players
 type World struct {
-	db          database.DB
-	tiles       map[WorldCoord]*WorldTile
-	players     map[uint64]map[string]interface{}
-	mutex       sync.RWMutex
-	tickChannel chan struct{}
-	stopChannel chan struct{}
+	db            database.DB
+	tiles         map[WorldCoord]*WorldTile
+	players       map[uint64]map[string]interface{}
+	mutex         sync.RWMutex
+	stopChan      chan struct{}
+	wg            sync.WaitGroup
+	tickInterval  time.Duration
+	currentTick   uint64
 }
 
 // WorldCoord represents a coordinate in the world
@@ -37,16 +39,91 @@ type WorldTile struct {
 // NewWorld creates a new world instance
 func NewWorld(db database.DB) *World {
 	world := &World{
-		db:          db,
-		tiles:       make(map[WorldCoord]*WorldTile),
-		players:     make(map[uint64]map[string]interface{}),
-		tickChannel: make(chan struct{}, 1),
-		stopChannel: make(chan struct{}),
+		db:           db,
+		tiles:        make(map[WorldCoord]*WorldTile),
+		players:      make(map[uint64]map[string]interface{}),
+		stopChan:     make(chan struct{}),
+		tickInterval: 1000 * time.Millisecond, // 1 秒
+		currentTick:  0,
 	}
 
-	log.Println("World initialized (memory mode)")
+	log.Println("[World] World initialized")
 
 	return world
+}
+
+// StartLoop 启动世界独立循环（独立 Goroutine）
+func (w *World) StartLoop() {
+	w.wg.Add(1)
+	go func() {
+		defer w.wg.Done()
+		log.Printf("[World] World loop started with tick interval: %v", w.tickInterval)
+		
+		ticker := time.NewTicker(w.tickInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				w.tick()
+			case <-w.stopChan:
+				log.Println("[World] World loop stopping...")
+				return
+			}
+		}
+	}()
+}
+
+// StopLoop 停止世界循环
+func (w *World) StopLoop() {
+	close(w.stopChan)
+	w.wg.Wait()
+	log.Println("[World] World loop stopped")
+}
+
+// tick 执行一个世界 tick
+func (w *World) tick() {
+	w.mutex.Lock()
+	w.currentTick++
+	tick := w.currentTick
+	w.mutex.Unlock()
+
+	// 每 10 个 tick 记录一次状态
+	if tick%10 == 0 {
+		log.Printf("[World] Tick: %d", tick)
+	}
+
+	// 处理资源生成
+	w.processResourceGeneration()
+
+	// 处理世界事件
+	w.processWorldEvents()
+
+	// 清理过期数据
+	w.processCleanup()
+}
+
+// processResourceGeneration 处理资源生成
+func (w *World) processResourceGeneration() {
+	w.mutex.RLock()
+	defer w.mutex.RUnlock()
+
+	for _, tile := range w.tiles {
+		if tile.BuildingID != "" && tile.OwnerID != 0 {
+			// 建筑资源生产逻辑
+			// TODO: 根据建筑类型生产资源
+		}
+	}
+}
+
+// processWorldEvents 处理世界事件
+func (w *World) processWorldEvents() {
+	// TODO: 随机事件、天气变化等
+}
+
+// processCleanup 清理过期数据
+func (w *World) processCleanup() {
+	// TODO: 清理不活跃玩家的地块等
 }
 
 // GetTile gets a tile at the specified coordinates
@@ -109,56 +186,11 @@ func (w *World) ClaimTile(playerID uint64, x, y int32) error {
 	tile := w.GetTile(x, y)
 
 	if tile.OwnerID != 0 {
-		return nil
+		return nil // Tile already claimed
 	}
 
 	tile.OwnerID = playerID
 	return w.SetTile(tile)
-}
-
-// StartGameLoop starts the world game loop
-func (w *World) StartGameLoop(tickInterval time.Duration) {
-	go func() {
-		ticker := time.NewTicker(tickInterval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				w.tick()
-			case <-w.stopChannel:
-				return
-			}
-		}
-	}()
-}
-
-// StopGameLoop stops the world game loop
-func (w *World) StopGameLoop() {
-	close(w.stopChannel)
-}
-
-// tick processes one game tick for the world
-func (w *World) tick() {
-	w.processResourceGeneration()
-}
-
-// processResourceGeneration processes resource generation
-func (w *World) processResourceGeneration() {
-	w.mutex.RLock()
-	defer w.mutex.RUnlock()
-
-	for _, tile := range w.tiles {
-		if tile.BuildingID != "" && tile.OwnerID != 0 {
-			if player, exists := w.players[tile.OwnerID]; exists {
-				for resType, amount := range map[string]int64{"gold": 10} {
-					if current, ok := player[resType].(int64); ok {
-						player[resType] = current + amount
-					}
-				}
-			}
-		}
-	}
 }
 
 // AddPlayer adds a player to the world
@@ -167,6 +199,7 @@ func (w *World) AddPlayer(playerID uint64, playerData map[string]interface{}) {
 	defer w.mutex.Unlock()
 
 	w.players[playerID] = playerData
+	log.Printf("[World] Player %d added to world", playerID)
 }
 
 // RemovePlayer removes a player from the world
@@ -175,6 +208,7 @@ func (w *World) RemovePlayer(playerID uint64) {
 	defer w.mutex.Unlock()
 
 	delete(w.players, playerID)
+	log.Printf("[World] Player %d removed from world", playerID)
 }
 
 // GetPlayer gets a player by ID
@@ -185,16 +219,19 @@ func (w *World) GetPlayer(playerID uint64) map[string]interface{} {
 	return w.players[playerID]
 }
 
-// Tick 世界 tick 更新
-func (w *World) Tick() {
+// GetTick 获取当前 tick 数
+func (w *World) GetTick() uint64 {
 	w.mutex.RLock()
 	defer w.mutex.RUnlock()
+	return w.currentTick
 }
 
 // GenerateWorld generates a new world with specified dimensions
 func (w *World) GenerateWorld(width, height int32) {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
+
+	log.Printf("[World] Generating world of size %dx%d", width, height)
 
 	for x := int32(0); x < width; x++ {
 		for y := int32(0); y < height; y++ {
@@ -223,5 +260,5 @@ func (w *World) GenerateWorld(width, height int32) {
 		}
 	}
 
-	log.Printf("Generated world of size %dx%d", width, height)
+	log.Printf("[World] World generated with %d tiles", len(w.tiles))
 }
