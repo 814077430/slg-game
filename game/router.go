@@ -1,13 +1,10 @@
 package game
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"slg-game/database"
 	"slg-game/errors"
 	"slg-game/log"
@@ -28,10 +25,10 @@ const (
 
 type MessageRouter struct {
 	handlers map[uint32]func(*PlayerSession, []byte) *network.Packet
-	db       *database.Database
+	db       *database.MemoryDB
 }
 
-func NewMessageRouter(db *database.Database) *MessageRouter {
+func NewMessageRouter(db *database.MemoryDB) *MessageRouter {
 	router := &MessageRouter{
 		handlers: make(map[uint32]func(*PlayerSession, []byte) *network.Packet),
 		db:       db,
@@ -77,8 +74,7 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 
 	// 查询数据库
 	collection := mr.db.GetCollection("players")
-	var player database.Player
-	err := collection.FindOne(context.Background(), bson.M{"username": request.Username}).Decode(&player)
+	player, err := collection.FindOne(map[string]interface{}{"username": request.Username})
 	if err != nil {
 		log.WithFields(map[string]interface{}{
 			"username": request.Username,
@@ -88,7 +84,7 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 
 	// 验证密码
 	hashedPassword := hashPassword(request.Password)
-	if player.PasswordHash != hashedPassword {
+	if player["password_hash"] != hashedPassword {
 		log.WithFields(map[string]interface{}{
 			"username": request.Username,
 		}).Warn("Login failed - wrong password")
@@ -96,53 +92,36 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 	}
 
 	// 更新最后登录时间
-	_, err = collection.UpdateOne(
-		context.Background(),
-		bson.M{"player_id": player.PlayerID},
-		bson.M{"$set": bson.M{"last_login": time.Now()}},
+	collection.UpdateOne(
+		map[string]interface{}{"player_id": player["player_id"]},
+		map[string]interface{}{"last_login": time.Now()},
 	)
-	if err != nil {
-		log.Errorf("Failed to update last login: %v", err)
-	}
 
 	// 设置会话状态
-	session.SetPlayerID(player.PlayerID)
-	session.SetUsername(player.Username)
+	session.SetPlayerID(uint64(player["player_id"].(uint64)))
+	session.SetUsername(player["username"].(string))
 	session.SetLoggedIn(true)
 
 	// 构建玩家数据响应
 	playerData := &proto.PlayerData{
-		PlayerId:   player.PlayerID,
-		Username:   player.Username,
-		Email:      player.Email,
-		Level:      player.Level,
-		Experience: player.Experience,
-		X:          player.X,
-		Y:          player.Y,
+		PlayerId:   uint64(player["player_id"].(uint64)),
+		Username:   player["username"].(string),
+		Email:      player["email"].(string),
+		Level:      int32(player["level"].(int32)),
+		Experience: player["experience"].(int64),
+		X:          int32(player["x"].(int32)),
+		Y:          int32(player["y"].(int32)),
 		Resources: map[string]int64{
-			"gold":  player.Gold,
-			"wood":  player.Wood,
-			"food":  player.Food,
+			"gold":  player["gold"].(int64),
+			"wood":  player["wood"].(int64),
+			"food":  player["food"].(int64),
 		},
-		CreatedAt: player.CreatedAt.UnixMilli(),
-		LastLogin: player.LastLogin.UnixMilli(),
-	}
-
-	// 转换建筑数据
-	for _, b := range player.Buildings {
-		playerData.Buildings = append(playerData.Buildings, &proto.Building{
-			BuildingId:   player.PlayerID,
-			BuildingType: b.Type,
-			Level:        b.Level,
-			X:            b.X,
-			Y:            b.Y,
-		})
 	}
 
 	response := &proto.S2C_LoginResponse{
 		Success:    true,
 		Message:    "Login successful",
-		PlayerId:   player.PlayerID,
+		PlayerId:   uint64(player["player_id"].(uint64)),
 		PlayerData: playerData,
 	}
 
@@ -153,8 +132,8 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 	}
 
 	log.WithFields(map[string]interface{}{
-		"player_id": player.PlayerID,
-		"username":  player.Username,
+		"player_id": player["player_id"],
+		"username":  player["username"],
 	}).Info("Player logged in")
 
 	return &network.Packet{
@@ -177,7 +156,7 @@ func (mr *MessageRouter) handleRegisterRequest(session *PlayerSession, data []by
 
 	// 检查用户名是否已存在
 	collection := mr.db.GetCollection("players")
-	count, err := collection.CountDocuments(context.Background(), bson.M{"username": request.Username})
+	count, err := collection.CountDocuments(map[string]interface{}{"username": request.Username})
 	if err != nil {
 		log.Errorf("Failed to check username: %v", err)
 		return createRegisterErrorResponse(errors.ErrDatabaseErrorErr)
@@ -190,57 +169,53 @@ func (mr *MessageRouter) handleRegisterRequest(session *PlayerSession, data []by
 	}
 
 	// 生成新的玩家 ID
-	var lastPlayer database.Player
-	err = collection.FindOne(context.Background(), bson.M{}, options.FindOne().SetSort(bson.M{"player_id": -1})).Decode(&lastPlayer)
-	newPlayerID := uint64(10001)
-	if err == nil {
-		newPlayerID = lastPlayer.PlayerID + 1
+	lastID := uint64(10000)
+	players := collection.GetAll()
+	for _, p := range players {
+		if id, ok := p["player_id"].(uint64); ok && id > lastID {
+			lastID = id
+		}
 	}
+	newPlayerID := lastID + 1
 
 	// 创建新玩家
 	hashedPassword := hashPassword(request.Password)
-	newPlayer := &database.Player{
-		PlayerID:     newPlayerID,
-		Username:     request.Username,
-		PasswordHash: hashedPassword,
-		Email:        request.Email,
-		CreatedAt:    time.Now(),
-		LastLogin:    time.Now(),
-		Level:        1,
-		Experience:   0,
-		Gold:         1000,
-		Wood:         1000,
-		Food:         1000,
-		Population:   0,
-		MaxPopulation: 100,
-		X:            0,
-		Y:            0,
-		Buildings:    []database.Building{},
-		Troops:       []database.Troop{},
-		Research:     make(map[string]int32),
-		Settings: database.PlayerSettings{
-			Language:      "zh-CN",
-			Notifications: true,
-			SoundEnabled:  true,
-			MusicEnabled:  true,
-		},
+	newPlayer := map[string]interface{}{
+		"player_id":      newPlayerID,
+		"username":       request.Username,
+		"password_hash":  hashedPassword,
+		"email":          request.Email,
+		"created_at":     time.Now(),
+		"last_login":     time.Now(),
+		"level":          int32(1),
+		"experience":     int64(0),
+		"gold":           int64(1000),
+		"wood":           int64(1000),
+		"food":           int64(1000),
+		"population":     int32(0),
+		"max_population": int32(100),
+		"x":              int32(0),
+		"y":              int32(0),
+		"buildings":      []interface{}{},
+		"troops":         []interface{}{},
+		"research":       make(map[string]int32),
 	}
 
-	_, err = collection.InsertOne(context.Background(), newPlayer)
+	err = collection.InsertOne(newPlayer)
 	if err != nil {
 		log.Errorf("Failed to create player: %v", err)
 		return createRegisterErrorResponse(errors.ErrDatabaseErrorErr)
 	}
 
 	// 设置会话状态
-	session.SetPlayerID(newPlayer.PlayerID)
-	session.SetUsername(newPlayer.Username)
+	session.SetPlayerID(newPlayerID)
+	session.SetUsername(request.Username)
 	session.SetLoggedIn(true)
 
 	response := &proto.S2C_RegisterResponse{
 		Success:  true,
 		Message:  "Registration successful",
-		PlayerId: newPlayer.PlayerID,
+		PlayerId: newPlayerID,
 	}
 
 	responseData, err := network.MarshalJSON(response)
@@ -250,8 +225,8 @@ func (mr *MessageRouter) handleRegisterRequest(session *PlayerSession, data []by
 	}
 
 	log.WithFields(map[string]interface{}{
-		"player_id": newPlayer.PlayerID,
-		"username":  newPlayer.Username,
+		"player_id": newPlayerID,
+		"username":  request.Username,
 	}).Info("New player registered")
 
 	return &network.Packet{
@@ -281,10 +256,9 @@ func (mr *MessageRouter) handleMoveRequest(session *PlayerSession, data []byte) 
 
 	// 更新玩家位置
 	collection := mr.db.GetCollection("players")
-	_, err := collection.UpdateOne(
-		context.Background(),
-		bson.M{"player_id": playerID},
-		bson.M{"$set": bson.M{"x": request.X, "y": request.Y}},
+	err := collection.UpdateOne(
+		map[string]interface{}{"player_id": playerID},
+		map[string]interface{}{"x": request.X, "y": request.Y},
 	)
 
 	if err != nil {
@@ -330,10 +304,6 @@ func (mr *MessageRouter) handleBuildRequest(session *PlayerSession, data []byte)
 	}
 
 	playerID := session.GetPlayerID()
-
-	// TODO: 检查资源是否足够
-	// TODO: 扣除资源
-	// TODO: 创建建筑
 
 	response := &proto.S2C_BuildResponse{
 		Success: true,

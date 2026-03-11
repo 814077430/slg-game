@@ -1,11 +1,9 @@
 package game
 
 import (
-	"context"
 	"sync"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
 	"slg-game/config"
 	"slg-game/database"
 	"slg-game/log"
@@ -14,7 +12,7 @@ import (
 
 type PlayerSession struct {
 	connection  *network.Connection
-	db          *database.Database
+	db          *database.MemoryDB
 	config      *config.Config
 	playerID    uint64
 	username    string
@@ -24,7 +22,7 @@ type PlayerSession struct {
 	mutex       sync.RWMutex
 }
 
-func NewPlayerSession(conn *network.Connection, db *database.Database, config *config.Config) *PlayerSession {
+func NewPlayerSession(conn *network.Connection, db *database.MemoryDB, config *config.Config) *PlayerSession {
 	return &PlayerSession{
 		connection: conn,
 		db:         db,
@@ -92,7 +90,7 @@ func (ps *PlayerSession) GetSessionDuration() time.Duration {
 	return time.Since(ps.loginTime)
 }
 
-// Cleanup 清理会话资源 - 保存玩家数据、从在线列表移除等
+// Cleanup 清理会话资源
 func (ps *PlayerSession) Cleanup() {
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
@@ -104,42 +102,5 @@ func (ps *PlayerSession) Cleanup() {
 			"username":  ps.username,
 			"duration":  duration.String(),
 		}).Info("Cleaning up session")
-
-		// 保存玩家数据到数据库
-		ps.savePlayerData()
-	}
-}
-
-// savePlayerData 保存玩家数据到数据库
-func (ps *PlayerSession) savePlayerData() {
-	if ps.playerID == 0 {
-		return
-	}
-
-	collection := ps.db.GetCollection("players")
-
-	// 更新最后登录时间和会话信息
-	update := bson.M{
-		"$set": bson.M{
-			"last_login": time.Now(),
-		},
-	}
-
-	_, err := collection.UpdateOne(
-		context.Background(),
-		bson.M{"player_id": ps.playerID},
-		update,
-	)
-
-	if err != nil {
-		log.WithFields(map[string]interface{}{
-			"player_id": ps.playerID,
-			"username":  ps.username,
-		}).Errorf("Failed to save player data: %v", err)
-	} else {
-		log.WithFields(map[string]interface{}{
-			"player_id": ps.playerID,
-			"username":  ps.username,
-		}).Info("Player data saved")
 	}
 }

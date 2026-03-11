@@ -1,5 +1,9 @@
 package database
 
+// 注意：MongoDB 代码已屏蔽，使用内存数据库
+// 如需启用 MongoDB，取消下方注释并安装 MongoDB
+
+/*
 import (
 	"context"
 	"log"
@@ -48,4 +52,13 @@ func (d *Database) Disconnect() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return d.client.Disconnect(ctx)
+}
+*/
+
+// 使用内存数据库
+type Database = MemoryDB
+
+// InitMongoDB 返回内存数据库（屏蔽 MongoDB）
+func InitMongoDB(uri, dbName string) (*MemoryDB, error) {
+	return NewMemoryDB(), nil
 }

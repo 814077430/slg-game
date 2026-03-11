@@ -1,40 +1,48 @@
 package game
 
 import (
-	"context"
 	"log"
 	"sync"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
 	"slg-game/database"
+)
+
+// ResourceType 资源类型
+type ResourceType string
+
+const (
+	ResourceGold  ResourceType = "gold"
+	ResourceWood  ResourceType = "wood"
+	ResourceFood  ResourceType = "food"
+	ResourceStone ResourceType = "stone"
+	ResourceIron  ResourceType = "iron"
 )
 
 // ResourceManager 资源管理器
 type ResourceManager struct {
-	db *database.Database
+	db *database.MemoryDB
 }
 
 // NewResourceManager 创建资源管理器
-func NewResourceManager(db *database.Database) *ResourceManager {
+func NewResourceManager(db *database.MemoryDB) *ResourceManager {
 	return &ResourceManager{db: db}
 }
 
 // GetPlayerResources 获取玩家资源
 func (rm *ResourceManager) GetPlayerResources(playerID uint64) (map[string]int64, error) {
 	collection := rm.db.GetCollection("players")
-	var player database.Player
-	err := collection.FindOne(context.Background(), bson.M{"player_id": playerID}).Decode(&player)
+	player, err := collection.FindOne(map[string]interface{}{"player_id": playerID})
 	if err != nil {
 		return nil, err
 	}
 
 	return map[string]int64{
-		"gold":  player.Gold,
-		"wood":  player.Wood,
-		"food":  player.Food,
-		"stone": 0, // 暂未实现
-		"iron":  0, // 暂未实现
+		"gold":  player["gold"].(int64),
+		"wood":  player["wood"].(int64),
+		"food":  player["food"].(int64),
+		"stone": 0,
+		"iron":  0,
 	}, nil
 }
 
@@ -57,64 +65,56 @@ func (rm *ResourceManager) CanAfford(playerID uint64, costs map[string]int64) (b
 func (rm *ResourceManager) DeductResources(playerID uint64, costs map[string]int64) error {
 	collection := rm.db.GetCollection("players")
 
-	update := bson.M{}
+	player, err := collection.FindOne(map[string]interface{}{"player_id": playerID})
+	if err != nil {
+		return err
+	}
+
+	update := make(map[string]interface{})
 	for resource, cost := range costs {
 		switch resource {
 		case "gold":
-			update["gold"] = bson.M{"$inc": -cost}
+			update["gold"] = player["gold"].(int64) - cost
 		case "wood":
-			update["wood"] = bson.M{"$inc": -cost}
+			update["wood"] = player["wood"].(int64) - cost
 		case "food":
-			update["food"] = bson.M{"$inc": -cost}
+			update["food"] = player["food"].(int64) - cost
 		}
 	}
 
-	if len(update) == 0 {
-		return nil
-	}
-
-	_, err := collection.UpdateOne(
-		context.Background(),
-		bson.M{"player_id": playerID},
-		update,
-	)
-	return err
+	return collection.UpdateOne(map[string]interface{}{"player_id": playerID}, update)
 }
 
 // AddResources 增加玩家资源
 func (rm *ResourceManager) AddResources(playerID uint64, gains map[string]int64) error {
 	collection := rm.db.GetCollection("players")
 
-	update := bson.M{}
+	player, err := collection.FindOne(map[string]interface{}{"player_id": playerID})
+	if err != nil {
+		return err
+	}
+
+	update := make(map[string]interface{})
 	for resource, gain := range gains {
 		switch resource {
 		case "gold":
-			update["gold"] = bson.M{"$inc": gain}
+			update["gold"] = player["gold"].(int64) + gain
 		case "wood":
-			update["wood"] = bson.M{"$inc": gain}
+			update["wood"] = player["wood"].(int64) + gain
 		case "food":
-			update["food"] = bson.M{"$inc": gain}
+			update["food"] = player["food"].(int64) + gain
 		}
 	}
 
-	if len(update) == 0 {
-		return nil
-	}
-
-	_, err := collection.UpdateOne(
-		context.Background(),
-		bson.M{"player_id": playerID},
-		update,
-	)
-	return err
+	return collection.UpdateOne(map[string]interface{}{"player_id": playerID}, update)
 }
 
-// ResourceCollector 资源收集器（定时收集）
+// ResourceCollector 资源收集器
 type ResourceCollector struct {
-	rm        *ResourceManager
-	interval  time.Duration
-	stopChan  chan struct{}
-	wg        sync.WaitGroup
+	rm       *ResourceManager
+	interval time.Duration
+	stopChan chan struct{}
+	wg       sync.WaitGroup
 }
 
 // NewResourceCollector 创建资源收集器
@@ -153,32 +153,22 @@ func (rc *ResourceCollector) Stop() {
 
 // collect 收集逻辑
 func (rc *ResourceCollector) collect() {
-	// 获取所有在线玩家
 	collection := rc.rm.db.GetCollection("players")
-	cursor, err := collection.Find(context.Background(), bson.M{})
-	if err != nil {
-		log.Printf("Failed to get players for resource collection: %v", err)
-		return
-	}
-	defer cursor.Close(context.Background())
+	players := collection.GetAll()
 
-	var players []database.Player
-	if err := cursor.All(context.Background(), &players); err != nil {
-		log.Printf("Failed to decode players: %v", err)
-		return
-	}
-
-	// 为每个玩家添加资源（基于建筑产量）
 	for _, player := range players {
-		// 基础资源产量（后续根据建筑计算）
+		playerID := player["player_id"].(uint64)
+		
+		// 基础资源产量
 		gains := map[string]int64{
 			"gold": 10,
 			"wood": 10,
 			"food": 10,
 		}
-		err := rc.rm.AddResources(player.PlayerID, gains)
+		
+		err := rc.rm.AddResources(playerID, gains)
 		if err != nil {
-			log.Printf("Failed to add resources for player %d: %v", player.PlayerID, err)
+			log.Printf("Failed to add resources for player %d: %v", playerID, err)
 		}
 	}
 

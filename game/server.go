@@ -11,14 +11,14 @@ import (
 )
 
 type GameServer struct {
-	db       *database.Database
+	db       *database.MemoryDB
 	config   *config.Config
 	router   *MessageRouter
 	gameLoop *GameLoop
 	world    *World
 }
 
-func NewGameServer(db *database.Database, cfg *config.Config) *GameServer {
+func NewGameServer(db *database.MemoryDB, cfg *config.Config) *GameServer {
 	// 创建消息路由器
 	router := NewMessageRouter(db)
 

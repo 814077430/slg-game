@@ -10,30 +10,30 @@ import (
 
 // GameLoop 游戏主循环
 type GameLoop struct {
-	db              *database.Database
-	tickInterval    time.Duration
-	tickCount       uint64
-	stopChan        chan struct{}
-	wg              sync.WaitGroup
-	resourceMgr     *ResourceManager
-	buildingMgr     *BuildingManager
-	technologyMgr   *TechnologyManager
-	world           *World
+	db            *database.MemoryDB
+	tickInterval  time.Duration
+	tickCount     uint64
+	stopChan      chan struct{}
+	wg            sync.WaitGroup
+	resourceMgr   *ResourceManager
+	buildingMgr   *BuildingManager
+	technologyMgr *TechnologyManager
+	world         *World
 }
 
 // NewGameLoop 创建游戏主循环
 func NewGameLoop(
-	db *database.Database,
+	db *database.MemoryDB,
 	tickInterval time.Duration,
 ) *GameLoop {
 	return &GameLoop{
-		db:           db,
-		tickInterval: tickInterval,
-		stopChan:     make(chan struct{}),
-		resourceMgr:  NewResourceManager(db),
-		buildingMgr:  NewBuildingManager(db),
+		db:            db,
+		tickInterval:  tickInterval,
+		stopChan:      make(chan struct{}),
+		resourceMgr:   NewResourceManager(db),
+		buildingMgr:   NewBuildingManager(db),
 		technologyMgr: NewTechnologyManager(db),
-		world:        NewWorld(db),
+		world:         NewWorld(db),
 	}
 }
 

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"net"
 	"os"
 	"os/signal"
@@ -17,33 +16,24 @@ func main() {
 	// 设置日志级别
 	log.SetLevel(log.InfoLevel)
 
-	log.Info("Starting SLG Game Server...")
+	log.Info("╔════════════════════════════════════════════════════════╗")
+	log.Info("║          SLG Game Server - Starting                    ║")
+	log.Info("╚════════════════════════════════════════════════════════╝")
 
 	// 加载配置
 	cfg := config.LoadConfig("config/game.json")
 	if cfg == nil {
 		log.Fatal("Failed to load config")
 	}
-	log.Info("Config loaded successfully")
+	log.Info("✓ Config loaded")
 
-	// 初始化 MongoDB 连接
-	db, err := database.InitMongoDB(cfg.Database.URL, cfg.Database.DatabaseName)
-	if err != nil {
-		log.Warnf("MongoDB connection failed: %v", err)
-		log.Warn("Install MongoDB to enable data persistence")
-		log.Warn("Download: https://www.mongodb.com/try/download/community")
-		log.Warn("")
-		log.Warn("Starting server anyway (login/register will fail without DB)...")
-	}
-	defer func() {
-		if db != nil && db.Client() != nil {
-			db.Client().Disconnect(context.Background())
-		}
-	}()
+	// 初始化数据库（内存模式）
+	db := database.NewMemoryDB()
+	log.Info("✓ Memory database initialized (MongoDB disabled)")
 
 	// 初始化游戏服务器
 	gameServer := game.NewGameServer(db, cfg)
-	log.Info("Game server initialized")
+	log.Info("✓ Game server initialized")
 
 	// 启动 TCP 服务器
 	listener, err := net.Listen("tcp", cfg.Server.Addr)
@@ -52,16 +42,26 @@ func main() {
 	}
 	defer listener.Close()
 
-	log.Infof("Game server started on %s", cfg.Server.Addr)
+	log.Infof("✓ Game server listening on %s", cfg.Server.Addr)
+	log.Info("")
+	log.Info("═══════════════════════════════════════════════════════")
+	log.Info("Server is ready!")
+	log.Info("")
+	log.Info("Test with:")
+	log.Info("  cd client && ./slg-client -server localhost:8080 -test all")
+	log.Info("═══════════════════════════════════════════════════════")
+	log.Info("")
 
 	// 处理优雅关闭
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-c
+		log.Info("")
 		log.Info("Shutting down server...")
 		gameServer.Shutdown()
 		listener.Close()
+		log.Info("Server stopped")
 		os.Exit(0)
 	}()
 
