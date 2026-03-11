@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -12,6 +13,12 @@ import (
 const (
 	HeaderSize = 8 // msg_id(4) + msg_len(4)
 )
+
+// Packet represents a network packet
+type Packet struct {
+	MsgID uint32
+	Data  []byte
+}
 
 // Encode serializes the packet
 func (p *Packet) Encode() []byte {
@@ -55,20 +62,6 @@ func MarshalJSON(v interface{}) ([]byte, error) {
 // UnmarshalJSON wraps JSON unmarshal
 func UnmarshalJSON(data []byte, v interface{}) error {
 	return json.Unmarshal(data, v)
-}
-
-// Errors
-var (
-	ErrPacketTooLarge = &PacketError{"packet too large"}
-	ErrConnectionClosed = &PacketError{"connection closed"}
-)
-
-type PacketError struct {
-	Message string
-}
-
-func (e *PacketError) Error() string {
-	return e.Message
 }
 
 // Client TCP 客户端
@@ -178,16 +171,6 @@ func (c *Client) Send(msgID uint32, data interface{}) error {
 	}
 }
 
-// Recv receives a packet from the server (blocking)
-func (c *Client) Recv() (*Packet, error) {
-	select {
-	case packet := <-c.recvChan:
-		return packet, nil
-	case <-c.closeChan:
-		return nil, ErrConnectionClosed
-	}
-}
-
 // RecvWithTimeout receives a packet with timeout
 func (c *Client) RecvWithTimeout(timeout time.Duration) (*Packet, error) {
 	timer := time.NewTimer(timeout)
@@ -226,11 +209,160 @@ func (c *Client) IsConnected() bool {
 	return !c.isClosed && c.conn != nil
 }
 
+// TestClient is a test client for the game server
+type TestClient struct {
+	client   *Client
+	playerId uint64
+	username string
+	isLoggedIn bool
+}
+
+// NewTestClient creates a new test client
+func NewTestClient(serverAddr string) *TestClient {
+	return &TestClient{
+		client: NewClient(serverAddr),
+	}
+}
+
+// Connect connects to the server
+func (tc *TestClient) Connect() error {
+	return tc.client.Connect()
+}
+
+// Register registers a new account
+func (tc *TestClient) Register(username, password, email string) (*S2C_RegisterResponse, error) {
+	req := &C2S_RegisterRequest{
+		Username: username,
+		Password: password,
+		Email:    email,
+	}
+
+	if err := tc.client.Send(MsgID_C2S_RegisterRequest, req); err != nil {
+		return nil, err
+	}
+
+	packet, err := tc.client.RecvWithTimeout(10 * time.Second)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp S2C_RegisterResponse
+	if err := json.Unmarshal(packet.Data, &resp); err != nil {
+		return nil, err
+	}
+
+	if resp.Success {
+		tc.playerId = resp.PlayerId
+		tc.username = username
+	}
+
+	return &resp, nil
+}
+
+// Login logs in to the server
+func (tc *TestClient) Login(username, password string) (*S2C_LoginResponse, error) {
+	req := &C2S_LoginRequest{
+		Username: username,
+		Password: password,
+	}
+
+	if err := tc.client.Send(MsgID_C2S_LoginRequest, req); err != nil {
+		return nil, err
+	}
+
+	packet, err := tc.client.RecvWithTimeout(10 * time.Second)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp S2C_LoginResponse
+	if err := json.Unmarshal(packet.Data, &resp); err != nil {
+		return nil, err
+	}
+
+	if resp.Success {
+		tc.playerId = resp.PlayerId
+		tc.username = username
+		tc.isLoggedIn = true
+	}
+
+	return &resp, nil
+}
+
+// Move sends a move request
+func (tc *TestClient) Move(x, y int32) (*S2C_MoveResponse, error) {
+	if !tc.isLoggedIn {
+		return nil, fmt.Errorf("not logged in")
+	}
+
+	req := &C2S_MoveRequest{X: x, Y: y}
+
+	if err := tc.client.Send(MsgID_C2S_MoveRequest, req); err != nil {
+		return nil, err
+	}
+
+	packet, err := tc.client.RecvWithTimeout(10 * time.Second)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp S2C_MoveResponse
+	if err := json.Unmarshal(packet.Data, &resp); err != nil {
+		return nil, err
+	}
+
+	return &resp, nil
+}
+
+// Build sends a build request
+func (tc *TestClient) Build(buildingType string, x, y int32) (*S2C_BuildResponse, error) {
+	if !tc.isLoggedIn {
+		return nil, fmt.Errorf("not logged in")
+	}
+
+	req := &C2S_BuildRequest{
+		BuildingType: buildingType,
+		X:            x,
+		Y:            y,
+	}
+
+	if err := tc.client.Send(MsgID_C2S_BuildRequest, req); err != nil {
+		return nil, err
+	}
+
+	packet, err := tc.client.RecvWithTimeout(10 * time.Second)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp S2C_BuildResponse
+	if err := json.Unmarshal(packet.Data, &resp); err != nil {
+		return nil, err
+	}
+
+	return &resp, nil
+}
+
+// Close closes the connection
+func (tc *TestClient) Close() {
+	tc.client.Close()
+}
+
 // Errors
 var (
+	ErrPacketTooLarge = &PacketError{"packet too large"}
+	ErrConnectionClosed = &PacketError{"connection closed"}
 	ErrSendQueueFull = &ClientError{"send queue full"}
 	ErrTimeout = &ClientError{"timeout"}
 )
+
+type PacketError struct {
+	Message string
+}
+
+func (e *PacketError) Error() string {
+	return e.Message
+}
 
 type ClientError struct {
 	Message string
