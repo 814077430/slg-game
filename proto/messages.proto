@@ -14,6 +14,12 @@ message C2S_LoginRequest {
   string password = 2;
 }
 
+message C2S_RegisterRequest {
+  string username = 1;
+  string password = 2;
+  string email = 3;
+}
+
 message C2S_MoveRequest {
   int32 x = 1;
   int32 y = 2;
@@ -25,8 +31,59 @@ message C2S_BuildRequest {
   int32 y = 3;
 }
 
+message C2S_UpgradeBuildingRequest {
+  uint64 building_id = 1;
+}
+
+message C2S_CollectResourcesRequest {
+  uint64 building_id = 1;
+}
+
+message C2S_TrainTroopsRequest {
+  string troop_type = 1;
+  int32 count = 2;
+  uint64 barracks_id = 3;
+}
+
+message C2S_ResearchTechnologyRequest {
+  string tech_type = 1;
+  uint64 academy_id = 2;
+}
+
+message C2S_AttackRequest {
+  uint64 target_player_id = 1;
+  repeated Troop troops = 2;
+}
+
+message C2S_GetPlayerInfoRequest {
+  uint64 player_id = 1;
+}
+
+message C2S_GetWorldMapRequest {
+  int32 start_x = 1;
+  int32 start_y = 2;
+  int32 width = 3;
+  int32 height = 4;
+}
+
+message C2S_JoinAllianceRequest {
+  uint64 alliance_id = 1;
+}
+
+message C2S_CreateAllianceRequest {
+  string name = 1;
+  string description = 2;
+}
+
 // 服务器到客户端的消息
 message S2C_LoginResponse {
+  bool success = 1;
+  string message = 2;
+  uint64 player_id = 3;
+  PlayerData player_data = 4;
+}
+
+message S2C_RegisterResponse {
   bool success = 1;
   string message = 2;
   uint64 player_id = 3;
@@ -42,9 +99,49 @@ message S2C_MoveResponse {
 message S2C_BuildResponse {
   bool success = 1;
   string message = 2;
-  string building_type = 3;
-  int32 x = 4;
-  int32 y = 5;
+  Building building = 3;
+}
+
+message S2C_UpgradeBuildingResponse {
+  bool success = 1;
+  string message = 2;
+  Building building = 3;
+}
+
+message S2C_CollectResourcesResponse {
+  bool success = 1;
+  string message = 2;
+  map<string, int64> collected_resources = 3;
+}
+
+message S2C_TrainTroopsResponse {
+  bool success = 1;
+  string message = 2;
+  TrainingQueue training_queue = 3;
+}
+
+message S2C_ResearchTechnologyResponse {
+  bool success = 1;
+  string message = 2;
+  ResearchQueue research_queue = 3;
+}
+
+message S2C_AttackResponse {
+  bool success = 1;
+  string message = 2;
+  BattleResult battle_result = 3;
+}
+
+message S2C_PlayerInfoResponse {
+  bool success = 1;
+  string message = 2;
+  PlayerData player_data = 3;
+}
+
+message S2C_WorldMapResponse {
+  bool success = 1;
+  string message = 2;
+  repeated Tile tiles = 3;
 }
 
 message S2C_PlayerUpdate {
@@ -52,5 +149,128 @@ message S2C_PlayerUpdate {
   string username = 2;
   int32 x = 3;
   int32 y = 4;
-  map<string, int32> resources = 5;
+  map<string, int64> resources = 5;
+  repeated Building buildings = 6;
+}
+
+message S2C_ResourceUpdate {
+  map<string, int64> resources = 1;
+  int64 last_update_time = 2;
+}
+
+message S2C_BuildingUpdate {
+  Building building = 1;
+}
+
+message S2C_TroopUpdate {
+  repeated Troop troops = 1;
+  repeated TrainingQueue training_queues = 2;
+}
+
+message S2C_TechnologyUpdate {
+  repeated Technology technologies = 1;
+  repeated ResearchQueue research_queues = 2;
+}
+
+message S2C_BattleNotification {
+  BattleResult battle_result = 1;
+}
+
+message S2C_AllianceUpdate {
+  Alliance alliance = 1;
+}
+
+// 数据结构定义
+message PlayerData {
+  uint64 player_id = 1;
+  string username = 2;
+  string email = 3;
+  int32 level = 4;
+  int64 experience = 5;
+  int32 x = 6;
+  int32 y = 7;
+  map<string, int64> resources = 8;
+  repeated Building buildings = 9;
+  repeated Technology technologies = 10;
+  repeated Troop troops = 11;
+  repeated TrainingQueue training_queues = 12;
+  repeated ResearchQueue research_queues = 13;
+  AllianceMember alliance_member = 14;
+  int64 created_at = 15;
+  int64 last_login = 16;
+}
+
+message Building {
+  uint64 building_id = 1;
+  string building_type = 2;
+  int32 level = 3;
+  int32 x = 4;
+  int32 y = 5;
+  int64 construction_end_time = 6;
+  int64 last_collection_time = 7;
+  map<string, int64> production_rates = 8;
+}
+
+message Technology {
+  string tech_type = 1;
+  int32 level = 2;
+  int64 research_end_time = 3;
+}
+
+message Troop {
+  string troop_type = 1;
+  int32 count = 2;
+  int32 level = 3;
+}
+
+message TrainingQueue {
+  uint64 queue_id = 1;
+  string troop_type = 2;
+  int32 count = 3;
+  int32 completed = 4;
+  int64 end_time = 5;
+  uint64 barracks_id = 6;
+}
+
+message ResearchQueue {
+  uint64 queue_id = 1;
+  string tech_type = 2;
+  int32 level = 3;
+  int64 end_time = 4;
+  uint64 academy_id = 5;
+}
+
+message BattleResult {
+  uint64 attacker_id = 1;
+  uint64 defender_id = 2;
+  bool attacker_won = 3;
+  int64 attacker_losses = 4;
+  int64 defender_losses = 5;
+  map<string, int64> looted_resources = 6;
+  int64 battle_time = 7;
+}
+
+message Tile {
+  int32 x = 1;
+  int32 y = 2;
+  string tile_type = 3;
+  uint64 owner_id = 4;
+  string owner_name = 5;
+  repeated Building buildings = 6;
+}
+
+message Alliance {
+  uint64 alliance_id = 1;
+  string name = 2;
+  string description = 3;
+  uint64 leader_id = 4;
+  repeated AllianceMember members = 5;
+  int64 created_at = 6;
+}
+
+message AllianceMember {
+  uint64 player_id = 1;
+  string username = 2;
+  string role = 3;
+  int64 joined_at = 4;
 }
