@@ -11,10 +11,11 @@ import (
 )
 
 type GameServer struct {
-	db     *database.Database
-	config *config.Config
-	router *MessageRouter
-	world  *World
+	db       *database.Database
+	config   *config.Config
+	router   *MessageRouter
+	gameLoop *GameLoop
+	world    *World
 }
 
 func NewGameServer(db *database.Database, cfg *config.Config) *GameServer {
@@ -24,15 +25,19 @@ func NewGameServer(db *database.Database, cfg *config.Config) *GameServer {
 	// 创建世界实例
 	world := NewWorld(db)
 
-	// 启动游戏主循环
+	// 创建游戏主循环
 	tickInterval := time.Duration(cfg.Game.TickInterval) * time.Millisecond
-	world.StartGameLoop(tickInterval)
+	gameLoop := NewGameLoop(db, tickInterval)
+
+	// 启动游戏主循环
+	gameLoop.Start()
 
 	return &GameServer{
-		db:     db,
-		config: cfg,
-		router: router,
-		world:  world,
+		db:       db,
+		config:   cfg,
+		router:   router,
+		gameLoop: gameLoop,
+		world:    world,
 	}
 }
 
@@ -70,8 +75,21 @@ func (gs *GameServer) HandleClient(conn net.Conn) {
 
 // Shutdown 优雅关闭服务器
 func (gs *GameServer) Shutdown() {
+	if gs.gameLoop != nil {
+		gs.gameLoop.Stop()
+	}
 	if gs.world != nil {
 		gs.world.StopGameLoop()
 	}
 	log.Println("Game server shutdown complete")
+}
+
+// GetGameLoop 获取游戏主循环
+func (gs *GameServer) GetGameLoop() *GameLoop {
+	return gs.gameLoop
+}
+
+// GetWorld 获取世界实例
+func (gs *GameServer) GetWorld() *World {
+	return gs.world
 }

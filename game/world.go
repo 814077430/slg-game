@@ -349,6 +349,15 @@ func (w *World) savePlayerData(player *database.Player) error {
 	return err
 }
 
+// Tick 世界 tick 更新
+func (w *World) Tick() {
+	// 处理世界级别的更新
+	w.mutex.RLock()
+	defer w.mutex.RUnlock()
+
+	// TODO: 处理世界事件、随机事件等
+}
+
 // GenerateWorld generates a new world with specified dimensions
 func (w *World) GenerateWorld(width, height int32) {
 	w.mutex.Lock()
