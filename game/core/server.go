@@ -110,6 +110,9 @@ func (gs *GameServer) Shutdown() {
 	if gs.world != nil {
 		gs.world.StopLoop()
 	}
+	if gs.armyMgr != nil {
+		gs.armyMgr.Stop()  // 停止战斗管理器
+	}
 	
 	log.Println("Game server shutdown complete")
 }
