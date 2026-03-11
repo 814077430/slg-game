@@ -97,30 +97,36 @@ main.go
   ├─► database/         (数据库连接)
   │     └─► MongoDB
   │
+  ├─► world/            (世界地图 - 独立线程)
+  │
+  ├─► battle/           (战斗系统 - 独立线程)
+  │
+  ├─► chat/             (聊天系统 - 独立线程)
+  │
   └─► game/
         │
-        ├─► GameServer
+        ├─► core/
         │     │
-        │     ├─► MessageRouter
-        │     │     └─► 消息处理 (Login/Register/Move/Build)
+        │     ├─► GameServer
+        │     │     │
+        │     │     ├─► MessageRouter
+        │     │     │     └─► 消息处理 (Login/Register/Move/Build)
+        │     │     │
+        │     │     ├─► PlayerSession
+        │     │     │     └─► 玩家状态管理
+        │     │     │
+        │     │     └─► GameLoop
+        │     │           └─► Tick 系统
         │     │
-        │     ├─► PlayerSession
-        │     │     └─► 玩家状态管理
-        │     │
-        │     └─► GameLoop
-        │           └─► Tick 系统
+        │     └─► PlayerManager
         │
-        ├─► World           (世界地图)
+        ├─► city/             (建筑系统)
         │
-        ├─► ResourceManager (资源系统)
+        ├─► resource/         (资源系统)
         │
-        ├─► BuildingManager (建筑系统)
+        ├─► alliance/         (联盟系统)
         │
-        ├─► ArmyManager     (战斗系统)
-        │
-        ├─► AllianceManager (联盟系统)
-        │
-        └─► TechnologyManager (科技系统)
+        └─► tech/             (科技系统)
 ```
 
 ## 数据流图
@@ -302,8 +308,13 @@ type BattleResult struct {
    │
    ├─► Create GameServer
    │     │
+   │     ├─► Initialize Independent Thread Modules:
+   │     │     ├─► world.NewWorld()      → Start World Loop
+   │     │     ├─► battle.NewBattleManager() → Start Battle Loop
+   │     │     └─► chat.NewChatManager()     → Start Chat Loop
+   │     │
    │     ├─► Create MessageRouter
-   │     ├─► Create World
+   │     ├─► Create PlayerManager
    │     └─► Start GameLoop
    │
    └─► Start TCP Listener
@@ -315,4 +326,4 @@ type BattleResult struct {
 
 ---
 
-*Last updated: 2026-03-11*
+*Last updated: 2026-03-12*

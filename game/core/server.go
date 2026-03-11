@@ -9,12 +9,12 @@ import (
 	"slg-game/database"
 	"slg-game/game/city"
 	"slg-game/network"
-	"slg-game/game/world"
+	"slg-game/world"
 	"slg-game/game/resource"
-	"slg-game/game/battle"
+	"slg-game/battle"
 	"slg-game/game/alliance"
 	"slg-game/game/tech"
-	"slg-game/game/chat"
+	"slg-game/chat"
 )
 
 type GameServer struct {
@@ -41,6 +41,9 @@ func NewGameServer(db database.DB, cfg *config.Config) *GameServer {
 	// 创建玩家管理器（视野范围 10 格）
 	players := NewPlayerManager(10)
 
+	// 创建聊天管理器（独立线程）
+	chatMgr := chat.NewChatManager(players)
+
 	// 创建消息路由器
 	router := NewMessageRouter(db, players, chatMgr)
 
@@ -54,9 +57,6 @@ func NewGameServer(db database.DB, cfg *config.Config) *GameServer {
 	battleMgr := battle.NewBattleManager(db)
 	allianceMgr := alliance.NewAllianceManager(db)
 	techMgr := tech.NewTechnologyManager(db)
-
-	// 创建聊天管理器（独立线程）
-	chatMgr := chat.NewChatManager(players)
 
 	// 启动独立线程
 	world.StartLoop()      // World 独立循环

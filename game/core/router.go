@@ -3,11 +3,12 @@ package core
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 	"time"
 
 	"slg-game/database"
 	"slg-game/errors"
-	"slg-game/game/chat"
+	"slg-game/chat"
 	"slg-game/log"
 	"slg-game/network"
 	pb "slg-game/protocol"
@@ -413,10 +414,12 @@ func (mr *MessageRouter) notifyPlayerEnter(playerID uint64, x, y int32) {
 	for _, p := range visiblePlayers {
 		session := mr.playerMgr.GetSession(p.ID)
 		if session != nil {
-			session.SendPacket(&network.Packet{
-				MsgID: MsgID_S2C_PlayerEnter,
-				Data:  data,
-			})
+			if ps, ok := session.(*PlayerSession); ok && ps != nil {
+				ps.SendPacket(&network.Packet{
+					MsgID: MsgID_S2C_PlayerEnter,
+					Data:  data,
+				})
+			}
 		}
 	}
 }
@@ -437,10 +440,12 @@ func (mr *MessageRouter) notifyPlayerLeave(playerID uint64) {
 	for _, p := range visiblePlayers {
 		session := mr.playerMgr.GetSession(p.ID)
 		if session != nil {
-			session.SendPacket(&network.Packet{
-				MsgID: MsgID_S2C_PlayerLeave,
-				Data:  data,
-			})
+			if ps, ok := session.(*PlayerSession); ok && ps != nil {
+				ps.SendPacket(&network.Packet{
+					MsgID: MsgID_S2C_PlayerLeave,
+					Data:  data,
+				})
+			}
 		}
 	}
 }
@@ -463,10 +468,12 @@ func (mr *MessageRouter) notifyPlayerMove(playerID uint64, x, y int32) {
 	for _, p := range visiblePlayers {
 		session := mr.playerMgr.GetSession(p.ID)
 		if session != nil {
-			session.SendPacket(&network.Packet{
-				MsgID: MsgID_S2C_PlayerMove,
-				Data:  data,
-			})
+			if ps, ok := session.(*PlayerSession); ok && ps != nil {
+				ps.SendPacket(&network.Packet{
+					MsgID: MsgID_S2C_PlayerMove,
+					Data:  data,
+				})
+			}
 		}
 	}
 }
@@ -548,24 +555,37 @@ func (mr *MessageRouter) handleChatRequest(session *PlayerSession, data []byte) 
 		return createChatErrorResponse(errors.ErrNotLoggedInErr)
 	}
 
+	var content, channel string
+	
+	// 尝试解析为 Protobuf
 	request := &pb.C2S_ChatRequest{}
-	if err := protocol.Unmarshal(data, request); err != nil {
-		log.Errorf("Failed to unmarshal chat request: %v", err)
-		return createChatErrorResponse(errors.ErrInvalidRequestErr)
+	if err := protocol.Unmarshal(data, request); err == nil && request.Content != "" {
+		content = request.Content
+		channel = request.Channel
+	} else {
+		// 回退到文本解析（格式：channel content）
+		text := strings.TrimSpace(string(data))
+		parts := strings.SplitN(text, " ", 2)
+		if len(parts) >= 2 {
+			channel = parts[0]
+			content = parts[1]
+		} else if len(parts) == 1 {
+			channel = "world"
+			content = parts[0]
+		}
 	}
 
 	// 验证消息内容
-	if len(request.Content) == 0 || len(request.Content) > 500 {
+	if len(content) == 0 || len(content) > 500 {
 		return createChatErrorResponse(errors.NewError(errors.ErrInvalidRequest, "Message length must be 1-500 characters"))
 	}
 
 	// 发送到聊天管理器
-	channel := request.Channel
 	if channel == "" {
-		channel = "world" // 默认全服频道
+		channel = "world"
 	}
 
-	mr.chatMgr.SendChat(session, request.Content, channel)
+	mr.chatMgr.SendChat(session, content, channel)
 
 	// 返回成功响应
 	response := &pb.S2C_ChatResponse{

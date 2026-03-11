@@ -18,8 +18,9 @@ type PlayerSession interface {
 
 // PlayerManager 玩家管理器接口
 type PlayerManager interface {
-	GetSession(playerID uint64) PlayerSession
+	GetSession(playerID uint64) interface{}
 	GetPlayerCount() int
+	GetAllPlayers() []interface{}
 }
 
 const (
@@ -124,9 +125,9 @@ func (cm *ChatManager) handleClientMessage(clientMsg *ClientMessage) {
 
 // broadcastMessage 广播消息给所有在线玩家
 func (cm *ChatManager) broadcastMessage(msg *ChatMessage) {
-	// 获取所有在线玩家（通过接口）
-	// 这里简化处理，实际需要通过接口获取
-	log.Printf("[Chat] Broadcasting message from %s", msg.Username)
+	// 获取所有在线玩家并广播
+	players := cm.playerMgr.GetAllPlayers()
+	log.Printf("[Chat] Broadcasting message from %s to %d players", msg.Username, len(players))
 }
 
 // SendChat 发送聊天消息

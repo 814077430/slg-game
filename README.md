@@ -90,17 +90,31 @@ slg-game/
 │   ├── packet.go               # 数据包编解码
 │   └── connection.go           # 连接管理
 │
-├── game/                       # 游戏逻辑层
-│   ├── server.go               # 游戏服务器
-│   ├── router.go               # 消息路由
-│   ├── session.go              # 玩家会话
-│   ├── game_loop.go            # 游戏主循环
-│   ├── world.go                # 世界地图
-│   ├── resources_manager.go    # 资源管理
-│   ├── buildings.go            # 建筑系统
-│   ├── army_manager.go         # 军队/战斗
-│   ├── alliance_manager.go     # 联盟系统
-│   └── technology.go           # 科技系统
+├── world/                      # 世界地图模块（独立线程）
+│   └── world.go                # 世界地图管理
+│
+├── battle/                     # 战斗系统模块（独立线程）
+│   ├── battle_manager.go       # 战斗管理
+│   └── army_manager.go         # 军队管理
+│
+├── chat/                       # 聊天系统模块（独立线程）
+│   └── chat_manager.go         # 聊天管理
+│
+├── game/                       # 游戏核心逻辑层
+│   ├── core/                   # 核心服务
+│   │   ├── server.go           # 游戏服务器
+│   │   ├── router.go           # 消息路由
+│   │   ├── session.go          # 玩家会话
+│   │   ├── game_loop.go        # 游戏主循环
+│   │   └── player_manager.go   # 玩家管理
+│   ├── city/                   # 建筑系统
+│   │   └── buildings.go        # 建筑管理
+│   ├── resource/               # 资源系统
+│   │   └── resources_manager.go # 资源管理
+│   ├── alliance/               # 联盟系统
+│   │   └── alliance_manager.go # 联盟管理
+│   └── tech/                   # 科技系统
+│       └── technology.go       # 科技管理
 │
 └── proto/                      # 协议定义
     └── messages.pb.go          # 消息数据结构

@@ -13,6 +13,13 @@ type PlayerInfo struct {
 	Online   bool
 }
 
+// GetPlayerInfo 获取玩家信息（用于 chat 包）
+func (pm *PlayerManager) GetPlayerInfo(playerID uint64) *PlayerInfo {
+	pm.mutex.RLock()
+	defer pm.mutex.RUnlock()
+	return pm.players[playerID]
+}
+
 // PlayerManager 玩家管理器
 type PlayerManager struct {
 	players    map[uint64]*PlayerInfo
@@ -107,6 +114,13 @@ func (pm *PlayerManager) GetPlayersInVision(playerID uint64) []*PlayerInfo {
 	return visible
 }
 
+// GetSession 获取玩家会话（返回 interface{} 避免循环导入）
+func (pm *PlayerManager) GetSession(playerID uint64) interface{} {
+	pm.mutex.RLock()
+	defer pm.mutex.RUnlock()
+	return pm.sessions[playerID]
+}
+
 // GetPlayerCount 获取在线玩家数量
 func (pm *PlayerManager) GetPlayerCount() int {
 	pm.mutex.RLock()
@@ -122,25 +136,17 @@ func (pm *PlayerManager) GetPlayerCount() int {
 }
 
 // GetAllPlayers 获取所有在线玩家
-func (pm *PlayerManager) GetAllPlayers() []*PlayerInfo {
+func (pm *PlayerManager) GetAllPlayers() []interface{} {
 	pm.mutex.RLock()
 	defer pm.mutex.RUnlock()
 
-	var players []*PlayerInfo
+	var players []interface{}
 	for _, player := range pm.players {
 		if player.Online {
 			players = append(players, player)
 		}
 	}
 	return players
-}
-
-// GetSession 获取玩家会话
-func (pm *PlayerManager) GetSession(playerID uint64) *PlayerSession {
-	pm.mutex.RLock()
-	defer pm.mutex.RUnlock()
-
-	return pm.sessions[playerID]
 }
 
 // abs32 int32 绝对值
