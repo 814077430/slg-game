@@ -1,4 +1,4 @@
-package army
+package battle
 
 import (
 	"math/rand"

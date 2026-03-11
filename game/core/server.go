@@ -11,7 +11,7 @@ import (
 	"slg-game/network"
 	"slg-game/game/world"
 	"slg-game/game/resource"
-	"slg-game/game/army"
+	"slg-game/game/battle"
 	"slg-game/game/alliance"
 	"slg-game/game/tech"
 )
@@ -26,7 +26,7 @@ type GameServer struct {
 	// 模块管理器
 	buildingMgr  *city.BuildingManager
 	resourceMgr  *resource.ResourceManager
-	armyMgr      *army.ArmyManager
+	battleMgr    *battle.BattleManager
 	allianceMgr  *alliance.AllianceManager
 	techMgr      *tech.TechnologyManager
 }
@@ -45,13 +45,14 @@ func NewGameServer(db database.DB, cfg *config.Config) *GameServer {
 	// 初始化各模块管理器
 	buildingMgr := city.NewBuildingManager(db)
 	resourceMgr := resource.NewResourceManager(db)
-	armyMgr := army.NewArmyManager(db)
+	battleMgr := battle.NewBattleManager(db)
 	allianceMgr := alliance.NewAllianceManager(db)
 	techMgr := tech.NewTechnologyManager(db)
 
 	// 启动独立线程
 	world.StartLoop()      // World 独立循环
 	gameLoop.Start()       // GameLoop 独立循环
+	battleMgr.StartLoop()  // Battle 独立循环
 
 	return &GameServer{
 		db:           db,
@@ -61,7 +62,7 @@ func NewGameServer(db database.DB, cfg *config.Config) *GameServer {
 		world:        world,
 		buildingMgr:  buildingMgr,
 		resourceMgr:  resourceMgr,
-		armyMgr:      armyMgr,
+		battleMgr:    battleMgr,
 		allianceMgr:  allianceMgr,
 		techMgr:      techMgr,
 	}
@@ -110,8 +111,8 @@ func (gs *GameServer) Shutdown() {
 	if gs.world != nil {
 		gs.world.StopLoop()
 	}
-	if gs.armyMgr != nil {
-		gs.armyMgr.Stop()  // 停止战斗管理器
+	if gs.battleMgr != nil {
+		gs.battleMgr.Stop()  // 停止战斗管理器
 	}
 	
 	log.Println("Game server shutdown complete")

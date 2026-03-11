@@ -1,4 +1,4 @@
-package army
+package battle
 
 import (
 	"log"
@@ -63,6 +63,11 @@ func (bm *BattleManager) StopLoop() {
 	close(bm.stopChan)
 	bm.wg.Wait()
 	log.Println("[Battle] Battle loop stopped")
+}
+
+// Stop 停止战斗管理器（别名）
+func (bm *BattleManager) Stop() {
+	bm.StopLoop()
 }
 
 // tick 执行一个战斗 tick
