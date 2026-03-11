@@ -5,6 +5,8 @@
 *.so
 *.dylib
 slg-server
+slg-client
+client/slg-client
 
 # Test binary
 *.test
