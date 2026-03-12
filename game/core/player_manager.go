@@ -19,11 +19,20 @@ type OfflinePlayer struct {
 	LastLogout time.Time
 }
 
+// PlayerCache 玩家缓存数据（用于登录验证）
+type PlayerCache struct {
+	PlayerID     uint64
+	Username     string
+	PasswordHash string
+}
+
 // PlayerManager 玩家管理器
 type PlayerManager struct {
 	players        map[uint64]*session.PlayerInfo      // 在线玩家
 	sessions       map[uint64]session.Session          // 在线会话
 	offlinePlayers map[uint64]*OfflinePlayer           // 离线玩家（保留 1 小时）
+	usernameIndex  map[string]uint64                   // 用户名→玩家 ID 索引
+	playerCache    map[uint64]*PlayerCache             // 玩家数据缓存（含密码哈希）
 	mutex          sync.RWMutex
 	cleanupTicker  *time.Ticker
 	stopChan       chan struct{}
@@ -35,6 +44,8 @@ func NewPlayerManager() *PlayerManager {
 		players:        make(map[uint64]*session.PlayerInfo),
 		sessions:       make(map[uint64]session.Session),
 		offlinePlayers: make(map[uint64]*OfflinePlayer),
+		usernameIndex:  make(map[string]uint64),   // 用户名索引
+		playerCache:    make(map[uint64]*PlayerCache), // 玩家数据缓存
 		stopChan:       make(chan struct{}),
 	}
 
@@ -120,6 +131,34 @@ func (pm *PlayerManager) RemoveOfflinePlayer(playerID uint64) {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
 	delete(pm.offlinePlayers, playerID)
+}
+
+// AddPlayerCache 添加玩家缓存（注册时调用，包含密码哈希）
+func (pm *PlayerManager) AddPlayerCache(playerID uint64, username, passwordHash string) {
+	pm.mutex.Lock()
+	defer pm.mutex.Unlock()
+	pm.usernameIndex[username] = playerID
+	pm.playerCache[playerID] = &PlayerCache{
+		PlayerID:     playerID,
+		Username:     username,
+		PasswordHash: passwordHash,
+	}
+}
+
+// GetPlayerCache 获取玩家缓存（登录时验证密码）
+func (pm *PlayerManager) GetPlayerCache(playerID uint64) (*PlayerCache, bool) {
+	pm.mutex.RLock()
+	defer pm.mutex.RUnlock()
+	cache, exists := pm.playerCache[playerID]
+	return cache, exists
+}
+
+// GetPlayerIDByUsername 通过用户名获取玩家 ID（登录时先用）
+func (pm *PlayerManager) GetPlayerIDByUsername(username string) (uint64, bool) {
+	pm.mutex.RLock()
+	defer pm.mutex.RUnlock()
+	playerID, exists := pm.usernameIndex[username]
+	return playerID, exists
 }
 
 // Stop 停止玩家管理器

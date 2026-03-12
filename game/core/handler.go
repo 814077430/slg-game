@@ -106,34 +106,79 @@ func (h *CoreHandler) handleLoginRequest(sess session.Session, data []byte) *net
 		return createLoginErrorResponse(errors.NewError(errors.ErrInvalidRequest, "Username and password required"))
 	}
 
-	// 查询数据库获取玩家信息
-	collection := h.db.GetCollection("players")
-	player, err := collection.FindOne(map[string]interface{}{"username": request.Username})
-	if err != nil || player == nil {
-		log.WithFields(map[string]interface{}{
-			"username": request.Username,
-		}).Warn("Login failed - user not found")
-		return createLoginErrorResponse(errors.ErrUserNotFoundErr)
+	// 方案 B：先查内存索引，没有再查 MongoDB
+	// 解决异步写入导致的数据一致性问题
+	var playerID uint64
+	var found bool
+
+	// 方案 B：先从内存用户名索引查找玩家 ID
+	cachedPlayerID, exists := h.playerMgr.GetPlayerIDByUsername(request.Username)
+	if exists {
+		playerID = cachedPlayerID
+		found = true
 	}
 
-	// 验证密码
-	hashedPassword := hashPassword(request.Password)
-	if player["password_hash"] != hashedPassword {
-		log.WithFields(map[string]interface{}{
-			"username": request.Username,
-		}).Warn("Login failed - wrong password")
-		return createLoginErrorResponse(errors.ErrWrongPasswordErr)
+	// 内存没有，再查数据库
+	if !found {
+		collection := h.db.GetCollection("players")
+		player, err := collection.FindOne(map[string]interface{}{"username": request.Username})
+		
+		if err != nil || player == nil {
+			log.WithFields(map[string]interface{}{
+				"username": request.Username,
+			}).Warn("Login failed - user not found")
+			return createLoginErrorResponse(errors.ErrUserNotFoundErr)
+		}
+
+		// 验证密码
+		hashedPassword := hashPassword(request.Password)
+		if player["password_hash"] != hashedPassword {
+			log.WithFields(map[string]interface{}{
+				"username": request.Username,
+			}).Warn("Login failed - wrong password")
+			return createLoginErrorResponse(errors.ErrWrongPasswordErr)
+		}
+
+		// 获取玩家 ID
+		switch v := player["player_id"].(type) {
+		case int64:
+			playerID = uint64(v)
+		case uint64:
+			playerID = v
+		}
+	}
+
+	// 从内存缓存验证密码（方案 B 关键优化：不依赖数据库）
+	if found {
+		if cache, cacheExists := h.playerMgr.GetPlayerCache(playerID); cacheExists {
+			hashedPassword := hashPassword(request.Password)
+			if cache.PasswordHash != hashedPassword {
+				log.WithFields(map[string]interface{}{
+					"username": request.Username,
+				}).Warn("Login failed - wrong password")
+				return createLoginErrorResponse(errors.ErrWrongPasswordErr)
+			}
+		} else {
+			// 缓存不存在，降级查数据库验证
+			collection := h.db.GetCollection("players")
+			playerData, err := collection.FindOne(map[string]interface{}{"player_id": int64(playerID)})
+			if err != nil || playerData == nil {
+				log.WithFields(map[string]interface{}{
+					"player_id": playerID,
+				}).Warn("Login failed - player data not found")
+				return createLoginErrorResponse(errors.ErrUserNotFoundErr)
+			}
+			hashedPassword := hashPassword(request.Password)
+			if playerData["password_hash"] != hashedPassword {
+				log.WithFields(map[string]interface{}{
+					"username": request.Username,
+				}).Warn("Login failed - wrong password")
+				return createLoginErrorResponse(errors.ErrWrongPasswordErr)
+			}
+		}
 	}
 
 	// 更新最后登录时间（异步写入）
-	var playerID uint64
-	switch v := player["player_id"].(type) {
-	case int64:
-		playerID = uint64(v)
-	case uint64:
-		playerID = v
-	}
-
 	// 使用 MongoDB 异步写入器
 	if mongoDB, ok := h.db.(*database.MongoDatabase); ok {
 		writer := mongoDB.GetWriter()
@@ -141,29 +186,47 @@ func (h *CoreHandler) handleLoginRequest(sess session.Session, data []byte) *net
 			map[string]interface{}{"player_id": playerID},
 			map[string]interface{}{"last_login": time.Now()},
 		)
-	} else {
-		// 降级为同步写入（MemoryDB）
-		collection.UpdateOne(
-			map[string]interface{}{"player_id": playerID},
-			map[string]interface{}{"last_login": time.Now()},
-		)
 	}
 
 	// 设置会话状态
 	sess.SetPlayerID(playerID)
-	sess.SetUsername(player["username"].(string))
+	sess.SetUsername(request.Username)
 	sess.SetLoggedIn(true)
 
-	// 构建玩家数据响应
-	playerData := &pb.PlayerData{
+	// 构建玩家数据响应（从缓存或数据库获取）
+	var username, email string
+	var level int32
+	var gold, wood, food int64
+
+	// 尝试从缓存获取玩家数据
+	if cache, cacheExists := h.playerMgr.GetPlayerCache(playerID); cacheExists {
+		username = cache.Username
+		email = "" // 缓存中不包含 email
+		level = 1
+		gold, wood, food = 1000, 1000, 1000
+	} else {
+		// 缓存没有，查数据库
+		collection := h.db.GetCollection("players")
+		playerData, _ := collection.FindOne(map[string]interface{}{"player_id": int64(playerID)})
+		if playerData != nil {
+			username = playerData["username"].(string)
+			email = playerData["email"].(string)
+			level = int32(playerData["level"].(int64))
+			gold = playerData["gold"].(int64)
+			wood = playerData["wood"].(int64)
+			food = playerData["food"].(int64)
+		}
+	}
+
+	playerDataResp := &pb.PlayerData{
 		PlayerId: playerID,
-		Username: player["username"].(string),
-		Email:    player["email"].(string),
-		Level:    int32(player["level"].(int64)),
+		Username: username,
+		Email:    email,
+		Level:    level,
 		Resources: map[string]int64{
-			"gold": player["gold"].(int64),
-			"wood": player["wood"].(int64),
-			"food": player["food"].(int64),
+			"gold": gold,
+			"wood": wood,
+			"food": food,
 		},
 	}
 
@@ -171,7 +234,7 @@ func (h *CoreHandler) handleLoginRequest(sess session.Session, data []byte) *net
 		Success:    true,
 		Message:    "Login successful",
 		PlayerId:   playerID,
-		PlayerData: playerData,
+		PlayerData: playerDataResp,
 	}
 
 	responseData, err := protocol.Marshal(response)
@@ -181,8 +244,8 @@ func (h *CoreHandler) handleLoginRequest(sess session.Session, data []byte) *net
 	}
 
 	log.WithFields(map[string]interface{}{
-		"player_id": player["player_id"],
-		"username":  player["username"],
+		"player_id": playerID,
+		"username":  username,
 	}).Info("Player logged in")
 
 	return &network.Packet{
@@ -255,6 +318,9 @@ func (h *CoreHandler) handleRegisterRequest(sess session.Session, data []byte) *
 			return createRegisterErrorResponse(errors.ErrDatabaseErrorErr)
 		}
 	}
+
+	// 方案 B 关键优化：注册时同时更新内存索引和玩家缓存
+	h.playerMgr.AddPlayerCache(uint64(newPlayerID), request.Username, hashedPassword)
 
 	// 设置会话状态
 	sess.SetPlayerID(uint64(newPlayerID))
