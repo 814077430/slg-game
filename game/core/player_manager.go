@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"slg-game/chat"
+	"slg-game/database"
 	"slg-game/handler"
 	"slg-game/session"
 )
@@ -21,11 +22,12 @@ type OfflinePlayer struct {
 
 // PlayerManager 玩家管理器
 type PlayerManager struct {
-	players        map[uint64]*session.PlayerInfo // 在线玩家（一直在内存）
-	sessions       map[uint64]session.Session     // 在线会话
-	offlinePlayers map[uint64]*OfflinePlayer      // 离线玩家（保留 10 分钟）
-	usernameIndex  map[string]uint64              // 用户名索引
-	playerCache    map[uint64]*PlayerCache        // 玩家数据缓存（含密码哈希，保留 10 分钟）
+	players        map[uint64]*session.PlayerInfo     // 在线玩家（一直在内存）
+	sessions       map[uint64]session.Session         // 在线会话
+	offlinePlayers map[uint64]*OfflinePlayer          // 离线玩家（保留 10 分钟）
+	usernameIndex  map[string]uint64                  // 用户名索引
+	playerCache    map[uint64]*PlayerCache            // 玩家数据缓存（含密码哈希，保留 10 分钟）
+	mongoWriter    *database.MongoAsyncWriter         // MongoDB 异步写入器
 	mutex          sync.RWMutex
 	cleanupTicker  *time.Ticker
 	stopChan       chan struct{}
@@ -38,13 +40,14 @@ type PlayerCache struct {
 }
 
 // NewPlayerManager 创建玩家管理器
-func NewPlayerManager() *PlayerManager {
+func NewPlayerManager(mongoWriter *database.MongoAsyncWriter) *PlayerManager {
 	pm := &PlayerManager{
 		players:        make(map[uint64]*session.PlayerInfo),
 		sessions:       make(map[uint64]session.Session),
 		offlinePlayers: make(map[uint64]*OfflinePlayer),
 		usernameIndex:  make(map[string]uint64),
 		playerCache:    make(map[uint64]*PlayerCache),
+		mongoWriter:    mongoWriter,
 		stopChan:       make(chan struct{}),
 	}
 
@@ -105,7 +108,7 @@ func (pm *PlayerManager) AddPlayer(playerID uint64, username string, sess sessio
 	pm.usernameIndex[username] = playerID
 }
 
-// AddPlayerCache 添加玩家缓存（注册时使用）
+// AddPlayerCache 添加玩家缓存（注册时使用）并异步写入 MongoDB
 func (pm *PlayerManager) AddPlayerCache(playerID uint64, username, passwordHash string) {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
@@ -114,6 +117,39 @@ func (pm *PlayerManager) AddPlayerCache(playerID uint64, username, passwordHash 
 	pm.playerCache[playerID] = &PlayerCache{
 		Username:     username,
 		PasswordHash: passwordHash,
+	}
+
+	// 异步写入 MongoDB
+	if pm.mongoWriter != nil {
+		go func() {
+			pm.mongoWriter.UpdatePlayer(playerID, map[string]interface{}{
+				"player_id":     playerID,
+				"username":      username,
+				"password_hash": passwordHash,
+			})
+		}()
+	}
+}
+
+// UpdatePlayerData 更新玩家数据并异步写入 MongoDB
+func (pm *PlayerManager) UpdatePlayerData(playerID uint64, data map[string]interface{}) {
+	pm.mutex.Lock()
+	if player, exists := pm.players[playerID]; exists {
+		// 更新内存数据
+		if x, ok := data["x"].(int32); ok {
+			player.X = x
+		}
+		if y, ok := data["y"].(int32); ok {
+			player.Y = y
+		}
+	}
+	pm.mutex.Unlock()
+
+	// 异步写入 MongoDB
+	if pm.mongoWriter != nil {
+		go func() {
+			pm.mongoWriter.UpdatePlayer(playerID, data)
+		}()
 	}
 }
 
@@ -188,14 +224,23 @@ func (pm *PlayerManager) GetPlayerCount() int {
 	return len(pm.players)
 }
 
-// UpdatePlayerPosition 更新玩家位置
+// UpdatePlayerPosition 更新玩家位置并异步写入 MongoDB
 func (pm *PlayerManager) UpdatePlayerPosition(playerID uint64, x, y int32) {
 	pm.mutex.Lock()
-	defer pm.mutex.Unlock()
-
 	if player, exists := pm.players[playerID]; exists {
 		player.X = x
 		player.Y = y
+	}
+	pm.mutex.Unlock()
+
+	// 异步写入 MongoDB
+	if pm.mongoWriter != nil {
+		go func() {
+			pm.mongoWriter.UpdatePlayer(playerID, map[string]interface{}{
+				"x": x,
+				"y": y,
+			})
+		}()
 	}
 }
 

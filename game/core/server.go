@@ -19,13 +19,14 @@ import (
 )
 
 type GameServer struct {
-	db       database.DB
-	config   *config.Config
-	router   *network.Router
-	gameLoop *GameLoop
-	world    *world.World
-	players  *PlayerManager
-	chatMgr  *chat.ChatManager
+	db          database.DB
+	config      *config.Config
+	router      *network.Router
+	gameLoop    *GameLoop
+	world       *world.World
+	players     *PlayerManager
+	chatMgr     *chat.ChatManager
+	mongoWriter *database.MongoAsyncWriter
 	
 	// 模块管理器
 	buildingMgr  *city.BuildingManager
@@ -40,11 +41,23 @@ type GameServer struct {
 }
 
 func NewGameServer(db database.DB, cfg *config.Config) *GameServer {
+	// 创建 MongoDB 异步写入器（100 条或 100ms 批量写入）
+	var mongoWriter *database.MongoAsyncWriter
+	if _, ok := db.(*database.MongoDatabase); ok {
+		// MongoDB 可用，创建异步写入器
+		mongoWriter, _ = database.NewMongoAsyncWriter(
+			"mongodb://localhost:27017",
+			"slg_game",
+			100,
+			100*time.Millisecond,
+		)
+	}
+
 	// 创建世界实例（独立线程）
 	world := world.NewWorld(db)
 
-	// 创建玩家管理器
-	players := NewPlayerManager()
+	// 创建玩家管理器（传入 MongoDB 异步写入器）
+	players := NewPlayerManager(mongoWriter)
 
 	// 创建聊天管理器（独立线程）
 	chatMgr := chat.NewChatManager(players)
@@ -72,10 +85,10 @@ func NewGameServer(db database.DB, cfg *config.Config) *GameServer {
 	techMgr := tech.NewTechnologyManager(db)
 
 	// 启动独立线程
-	world.StartLoop()      // World 独立循环
-	gameLoop.Start()       // GameLoop 独立循环
-	battleMgr.StartLoop()  // Battle 独立循环
-	chatMgr.StartLoop()    // Chat 独立循环
+	world.StartLoop()       // World 独立循环
+	gameLoop.Start()        // GameLoop 独立循环
+	battleMgr.StartLoop()   // Battle 独立循环
+	chatMgr.StartLoop()     // Chat 独立循环
 
 	return &GameServer{
 		db:           db,
@@ -85,6 +98,7 @@ func NewGameServer(db database.DB, cfg *config.Config) *GameServer {
 		world:        world,
 		players:      players,
 		chatMgr:      chatMgr,
+		mongoWriter:  mongoWriter,
 		buildingMgr:  buildingMgr,
 		resourceMgr:  resourceMgr,
 		battleMgr:    battleMgr,
@@ -146,6 +160,10 @@ func (gs *GameServer) Shutdown() {
 	}
 	if gs.players != nil {
 		gs.players.Stop()
+	}
+	// 停止 MongoDB 异步写入器（等待剩余数据写入）
+	if gs.mongoWriter != nil {
+		gs.mongoWriter.Stop()
 	}
 	
 	// 异步日志器会在程序退出时自动停止
