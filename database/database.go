@@ -55,6 +55,11 @@ type MongoCollection struct {
 	cache      *cache.PlayerCache
 }
 
+// GetMongoCollection 获取底层 MongoDB collection（用于批量写入）
+func (c *MongoCollection) GetMongoCollection() *mongo.Collection {
+	return c.collection
+}
+
 // CachedDatabase 带缓存的数据库（包装 MongoDatabase）
 type CachedDatabase struct {
 	mongo *MongoDatabase
@@ -97,12 +102,21 @@ func (m *MemoryDB) Disconnect() error {
 	return nil
 }
 
-// InitMongoDB 初始化 MongoDB 连接
+// InitMongoDB 初始化 MongoDB 连接（带连接池优化）
 func InitMongoDB(uri, dbName string) (*MongoDatabase, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
+	// 配置连接池选项
+	poolOpts := options.Client().
+		ApplyURI(uri).
+		SetMaxPoolSize(50).              // 最大连接数：50
+		SetMinPoolSize(10).              // 最小连接数：10
+		SetMaxConnIdleTime(30 * time.Second). // 连接空闲超时：30s
+		SetConnectTimeout(5 * time.Second).   // 连接超时：5s
+		SetServerSelectionTimeout(5 * time.Second) // 服务器选择超时：5s
+
+	client, err := mongo.Connect(ctx, poolOpts)
 	if err != nil {
 		return nil, err
 	}

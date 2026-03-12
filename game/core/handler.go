@@ -37,6 +37,7 @@ type CoreHandler struct {
 	db           database.DB
 	playerMgr    *PlayerManager
 	nextPlayerID int64
+	batchWriter  *database.BatchWriter // 批量写入器
 }
 
 // NewCoreHandler 创建核心协议处理器
@@ -60,6 +61,16 @@ func NewCoreHandler(db database.DB, playerMgr *PlayerManager) *CoreHandler {
 		if maxID > 0 {
 			handler.nextPlayerID = maxID + 1
 		}
+	}
+
+	// 初始化批量写入器（MongoDB 专用）
+	if mongoDB, ok := db.(*database.MongoDatabase); ok {
+		playersCollection := mongoDB.GetCollection("players").(*database.MongoCollection)
+		handler.batchWriter = database.NewBatchWriter(
+			playersCollection.GetMongoCollection(),
+			100,                // 最大批量大小：100
+			100*time.Millisecond, // 最大等待时间：100ms
+		)
 	}
 
 	return handler
@@ -284,12 +295,20 @@ func (h *CoreHandler) handleMoveRequest(sess session.Session, data []byte) *netw
 	// 更新玩家位置
 	sess.SetPosition(request.X, request.Y)
 
-	// 更新数据库
-	collection := h.db.GetCollection("players")
-	collection.UpdateOne(
-		map[string]interface{}{"player_id": playerID},
-		map[string]interface{}{"x": request.X, "y": request.Y},
-	)
+	// 批量更新数据库（如果启用了批量写入）
+	if h.batchWriter != nil {
+		h.batchWriter.UpdateOne(
+			map[string]interface{}{"player_id": playerID},
+			map[string]interface{}{"x": request.X, "y": request.Y},
+		)
+	} else {
+		// 回退到普通更新
+		collection := h.db.GetCollection("players")
+		collection.UpdateOne(
+			map[string]interface{}{"player_id": playerID},
+			map[string]interface{}{"x": request.X, "y": request.Y},
+		)
+	}
 
 	response := &pb.S2C_MoveResponse{
 		Success: true,
