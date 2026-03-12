@@ -45,6 +45,7 @@ type MongoDatabase struct {
 	db          *mongo.Database
 	collections map[string]*MongoCollection
 	mutex       sync.RWMutex
+	writer      *MongoWriter // 异步写入器
 }
 
 // MongoCollection MongoDB 集合实现
@@ -117,14 +118,22 @@ func InitMongoDB(uri, dbName string) (*MongoDatabase, error) {
 		return nil, err
 	}
 
+	// 创建异步写入器（独立线程）
+	// 批量大小：100，批量间隔：100ms
+	writer := NewMongoWriter(client, dbName, 100, 100*time.Millisecond)
+
 	return &MongoDatabase{
 		client:      client,
 		db:          client.Database(dbName),
 		collections: make(map[string]*MongoCollection),
+		writer:      writer,
 	}, nil
 }
 
-
+// GetWriter 获取异步写入器
+func (m *MongoDatabase) GetWriter() *MongoWriter {
+	return m.writer
+}
 
 func (m *MongoDatabase) GetCollection(name string) Collection {
 	m.mutex.Lock()
@@ -142,6 +151,11 @@ func (m *MongoDatabase) GetCollection(name string) Collection {
 }
 
 func (m *MongoDatabase) Disconnect() error {
+	// 先停止异步写入器
+	if m.writer != nil {
+		m.writer.Stop()
+	}
+
 	if m.client == nil {
 		return nil
 	}

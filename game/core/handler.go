@@ -37,7 +37,8 @@ type CoreHandler struct {
 	db           database.DB
 	playerMgr    *PlayerManager
 	nextPlayerID int64
-	batchWriter  *database.BatchWriter // 批量写入器
+	// 注意：MongoDB 异步写入由 database.MongoWriter 独立线程处理
+	// 不需要在 handler 中维护 batchWriter
 }
 
 // NewCoreHandler 创建核心协议处理器
@@ -63,15 +64,8 @@ func NewCoreHandler(db database.DB, playerMgr *PlayerManager) *CoreHandler {
 		}
 	}
 
-	// 初始化批量写入器（MongoDB 专用）
-	if mongoDB, ok := db.(*database.MongoDatabase); ok {
-		playersCollection := mongoDB.GetCollection("players").(*database.MongoCollection)
-		handler.batchWriter = database.NewBatchWriter(
-			playersCollection.GetMongoCollection(),
-			500,                // 最大批量大小：500（优化：提高批量大小）
-			50*time.Millisecond, // 最大等待时间：50ms（优化：减少等待时间）
-		)
-	}
+	// MongoDB 异步写入器在 database.InitMongoDB 中创建
+	// 通过 db.(*database.MongoDatabase).GetWriter() 访问
 
 	return handler
 }
@@ -131,7 +125,7 @@ func (h *CoreHandler) handleLoginRequest(sess session.Session, data []byte) *net
 		return createLoginErrorResponse(errors.ErrWrongPasswordErr)
 	}
 
-	// 更新最后登录时间（批量写入）
+	// 更新最后登录时间（异步写入）
 	var playerID uint64
 	switch v := player["player_id"].(type) {
 	case int64:
@@ -140,12 +134,15 @@ func (h *CoreHandler) handleLoginRequest(sess session.Session, data []byte) *net
 		playerID = v
 	}
 
-	if h.batchWriter != nil {
-		h.batchWriter.UpdateOne(
+	// 使用 MongoDB 异步写入器
+	if mongoDB, ok := h.db.(*database.MongoDatabase); ok {
+		writer := mongoDB.GetWriter()
+		writer.UpdateOne("players",
 			map[string]interface{}{"player_id": playerID},
 			map[string]interface{}{"last_login": time.Now()},
 		)
 	} else {
+		// 降级为同步写入（MemoryDB）
 		collection.UpdateOne(
 			map[string]interface{}{"player_id": playerID},
 			map[string]interface{}{"last_login": time.Now()},
@@ -246,10 +243,17 @@ func (h *CoreHandler) handleRegisterRequest(sess session.Session, data []byte) *
 		"research":       make(map[string]int32),
 	}
 
-	err = collection.InsertOne(newPlayer)
-	if err != nil {
-		log.Errorf("Failed to create player: %v", err)
-		return createRegisterErrorResponse(errors.ErrDatabaseErrorErr)
+	// 使用异步写入器（不阻塞）
+	if mongoDB, ok := h.db.(*database.MongoDatabase); ok {
+		writer := mongoDB.GetWriter()
+		writer.InsertOne("players", newPlayer)
+	} else {
+		// 降级为同步写入（MemoryDB）
+		err = collection.InsertOne(newPlayer)
+		if err != nil {
+			log.Errorf("Failed to create player: %v", err)
+			return createRegisterErrorResponse(errors.ErrDatabaseErrorErr)
+		}
 	}
 
 	// 设置会话状态
@@ -302,14 +306,15 @@ func (h *CoreHandler) handleMoveRequest(sess session.Session, data []byte) *netw
 	// 更新玩家位置
 	sess.SetPosition(request.X, request.Y)
 
-	// 批量更新数据库（如果启用了批量写入）
-	if h.batchWriter != nil {
-		h.batchWriter.UpdateOne(
+	// 使用 MongoDB 异步写入器（不阻塞）
+	if mongoDB, ok := h.db.(*database.MongoDatabase); ok {
+		writer := mongoDB.GetWriter()
+		writer.UpdateOne("players",
 			map[string]interface{}{"player_id": playerID},
 			map[string]interface{}{"x": request.X, "y": request.Y},
 		)
 	} else {
-		// 回退到普通更新
+		// 降级为同步写入（MemoryDB）
 		collection := h.db.GetCollection("players")
 		collection.UpdateOne(
 			map[string]interface{}{"player_id": playerID},

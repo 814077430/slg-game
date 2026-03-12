@@ -39,7 +39,7 @@ func main() {
 		log.Info("✓ MongoDB connected successfully")
 		log.Info("  Database: slg_game")
 		log.Info("  Connection pool: Max 100, Min 20")
-		log.Info("  Batch write: 500 ops/50ms")
+		log.Info("  Async writer: 100 ops/100ms (independent thread)")
 		log.Info("  Data will be persisted across restarts")
 	}
 	defer db.Disconnect()
