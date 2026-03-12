@@ -112,10 +112,10 @@ func (h *CoreHandler) handleLoginRequest(sess session.Session, data []byte) *net
 		return createLoginErrorResponse(errors.NewError(errors.ErrInvalidRequest, "Username and password required"))
 	}
 
-	// 查询数据库
+	// 查询数据库获取玩家信息
 	collection := h.db.GetCollection("players")
 	player, err := collection.FindOne(map[string]interface{}{"username": request.Username})
-	if err != nil {
+	if err != nil || player == nil {
 		log.WithFields(map[string]interface{}{
 			"username": request.Username,
 		}).Warn("Login failed - user not found")
@@ -131,13 +131,7 @@ func (h *CoreHandler) handleLoginRequest(sess session.Session, data []byte) *net
 		return createLoginErrorResponse(errors.ErrWrongPasswordErr)
 	}
 
-	// 更新最后登录时间
-	collection.UpdateOne(
-		map[string]interface{}{"player_id": player["player_id"]},
-		map[string]interface{}{"last_login": time.Now()},
-	)
-
-	// 设置会话状态
+	// 更新最后登录时间（批量写入）
 	var playerID uint64
 	switch v := player["player_id"].(type) {
 	case int64:
@@ -146,6 +140,19 @@ func (h *CoreHandler) handleLoginRequest(sess session.Session, data []byte) *net
 		playerID = v
 	}
 
+	if h.batchWriter != nil {
+		h.batchWriter.UpdateOne(
+			map[string]interface{}{"player_id": playerID},
+			map[string]interface{}{"last_login": time.Now()},
+		)
+	} else {
+		collection.UpdateOne(
+			map[string]interface{}{"player_id": playerID},
+			map[string]interface{}{"last_login": time.Now()},
+		)
+	}
+
+	// 设置会话状态
 	sess.SetPlayerID(playerID)
 	sess.SetUsername(player["username"].(string))
 	sess.SetLoggedIn(true)

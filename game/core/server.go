@@ -144,6 +144,11 @@ func (gs *GameServer) Shutdown() {
 	if gs.chatMgr != nil {
 		gs.chatMgr.StopLoop()
 	}
+	if gs.players != nil {
+		gs.players.Stop()
+	}
+	
+	// 异步日志器会在程序退出时自动停止
 	
 	log.Println("Game server shutdown complete")
 }

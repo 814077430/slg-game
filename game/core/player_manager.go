@@ -2,6 +2,7 @@ package core
 
 import (
 	"sync"
+	"time"
 
 	"slg-game/chat"
 	"slg-game/handler"
@@ -12,18 +13,62 @@ import (
 var _ chat.PlayerManager = (*PlayerManager)(nil)
 var _ handler.PlayerManager = (*PlayerManager)(nil)
 
+// OfflinePlayer 离线玩家数据
+type OfflinePlayer struct {
+	Info       *session.PlayerInfo
+	LastLogout time.Time
+}
+
 // PlayerManager 玩家管理器
 type PlayerManager struct {
-	players   map[uint64]*session.PlayerInfo
-	sessions  map[uint64]session.Session
-	mutex     sync.RWMutex
+	players        map[uint64]*session.PlayerInfo      // 在线玩家
+	sessions       map[uint64]session.Session          // 在线会话
+	offlinePlayers map[uint64]*OfflinePlayer           // 离线玩家（保留 1 小时）
+	mutex          sync.RWMutex
+	cleanupTicker  *time.Ticker
+	stopChan       chan struct{}
 }
 
 // NewPlayerManager 创建玩家管理器
 func NewPlayerManager() *PlayerManager {
-	return &PlayerManager{
-		players:  make(map[uint64]*session.PlayerInfo),
-		sessions: make(map[uint64]session.Session),
+	pm := &PlayerManager{
+		players:        make(map[uint64]*session.PlayerInfo),
+		sessions:       make(map[uint64]session.Session),
+		offlinePlayers: make(map[uint64]*OfflinePlayer),
+		stopChan:       make(chan struct{}),
+	}
+
+	// 启动定期清理协程（每 5 分钟清理过期离线数据）
+	pm.cleanupTicker = time.NewTicker(5 * time.Minute)
+	go pm.cleanupLoop()
+
+	return pm
+}
+
+// cleanupLoop 定期清理过期离线玩家数据
+func (pm *PlayerManager) cleanupLoop() {
+	defer pm.cleanupTicker.Stop()
+
+	for {
+		select {
+		case <-pm.cleanupTicker.C:
+			pm.cleanupExpiredOfflinePlayers()
+		case <-pm.stopChan:
+			return
+		}
+	}
+}
+
+// cleanupExpiredOfflinePlayers 清理过期（>1 小时）的离线玩家数据
+func (pm *PlayerManager) cleanupExpiredOfflinePlayers() {
+	pm.mutex.Lock()
+	defer pm.mutex.Unlock()
+
+	now := time.Now()
+	for playerID, offline := range pm.offlinePlayers {
+		if now.Sub(offline.LastLogout) > time.Hour {
+			delete(pm.offlinePlayers, playerID)
+		}
 	}
 }
 
@@ -42,15 +87,45 @@ func (pm *PlayerManager) AddPlayer(playerID uint64, username string, sess sessio
 	pm.sessions[playerID] = sess
 }
 
-// RemovePlayer 移除玩家
+// RemovePlayer 移除玩家（离线数据保留 1 小时）
 func (pm *PlayerManager) RemovePlayer(playerID uint64) {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
 
+	// 将玩家移到离线列表
 	if player, exists := pm.players[playerID]; exists {
-		player.Online = false
+		pm.offlinePlayers[playerID] = &OfflinePlayer{
+			Info:       player,
+			LastLogout: time.Now(),
+		}
+		delete(pm.players, playerID)
 	}
+
 	delete(pm.sessions, playerID)
+}
+
+// GetOfflinePlayer 获取离线玩家数据
+func (pm *PlayerManager) GetOfflinePlayer(playerID uint64) *session.PlayerInfo {
+	pm.mutex.RLock()
+	defer pm.mutex.RUnlock()
+
+	if offline, exists := pm.offlinePlayers[playerID]; exists {
+		return offline.Info
+	}
+	return nil
+}
+
+// RemoveOfflinePlayer 移除离线玩家数据（登录后调用）
+func (pm *PlayerManager) RemoveOfflinePlayer(playerID uint64) {
+	pm.mutex.Lock()
+	defer pm.mutex.Unlock()
+	delete(pm.offlinePlayers, playerID)
+}
+
+// Stop 停止玩家管理器
+func (pm *PlayerManager) Stop() {
+	close(pm.stopChan)
+	pm.cleanupTicker.Stop()
 }
 
 // UpdatePlayerPosition 更新玩家位置
