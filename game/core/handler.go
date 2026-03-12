@@ -68,8 +68,8 @@ func NewCoreHandler(db database.DB, playerMgr *PlayerManager) *CoreHandler {
 		playersCollection := mongoDB.GetCollection("players").(*database.MongoCollection)
 		handler.batchWriter = database.NewBatchWriter(
 			playersCollection.GetMongoCollection(),
-			100,                // 最大批量大小：100
-			100*time.Millisecond, // 最大等待时间：100ms
+			500,                // 最大批量大小：500（优化：提高批量大小）
+			50*time.Millisecond, // 最大等待时间：50ms（优化：减少等待时间）
 		)
 	}
 

@@ -38,7 +38,8 @@ func main() {
 		db = mongoDB
 		log.Info("✓ MongoDB connected successfully")
 		log.Info("  Database: slg_game")
-		log.Info("  Connection pool: Max 50, Min 10")
+		log.Info("  Connection pool: Max 100, Min 20")
+		log.Info("  Batch write: 500 ops/50ms")
 		log.Info("  Data will be persisted across restarts")
 	}
 	defer db.Disconnect()

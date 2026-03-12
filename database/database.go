@@ -101,8 +101,8 @@ func InitMongoDB(uri, dbName string) (*MongoDatabase, error) {
 	// 配置连接池选项
 	poolOpts := options.Client().
 		ApplyURI(uri).
-		SetMaxPoolSize(50).              // 最大连接数：50
-		SetMinPoolSize(10).              // 最小连接数：10
+		SetMaxPoolSize(100).             // 最大连接数：100（优化：支持更高并发）
+		SetMinPoolSize(20).              // 最小连接数：20（优化：增加基础连接）
 		SetMaxConnIdleTime(30 * time.Second). // 连接空闲超时：30s
 		SetConnectTimeout(5 * time.Second).   // 连接超时：5s
 		SetServerSelectionTimeout(5 * time.Second) // 服务器选择超时：5s
