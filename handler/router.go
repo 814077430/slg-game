@@ -20,10 +20,12 @@ import (
 // PlayerManager 接口（避免循环导入）
 type PlayerManager interface {
 	AddPlayer(playerID uint64, username string, session sessionPkg.Session)
+	AddPlayerCache(playerID uint64, username, passwordHash string)
 	RemovePlayer(playerID uint64)
 	UpdatePlayerPosition(playerID uint64, x, y int32)
 	GetSession(playerID uint64) sessionPkg.Session
 	GetAllPlayers() []interface{}
+	GetPlayerIDByUsername(username string) (uint64, bool)
 }
 
 const (
@@ -255,6 +257,10 @@ func (mr *MessageRouter) handleRegisterRequest(session sessionPkg.Session, data 
 	session.SetPlayerID(uint64(newPlayerID))
 	session.SetUsername(request.Username)
 	session.SetLoggedIn(true)
+
+	// 添加到玩家管理器缓存
+	mr.playerMgr.AddPlayer(uint64(newPlayerID), request.Username, session)
+	mr.playerMgr.AddPlayerCache(uint64(newPlayerID), request.Username, hashedPassword)
 
 	response := &pb.S2C_RegisterResponse{
 		Success:  true,

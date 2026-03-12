@@ -100,6 +100,21 @@ func (pm *PlayerManager) AddPlayer(playerID uint64, username string, sess sessio
 		Online:   true,
 	}
 	pm.sessions[playerID] = sess
+	
+	// 添加用户名索引（用于登录查找）
+	pm.usernameIndex[username] = playerID
+}
+
+// AddPlayerCache 添加玩家缓存（注册时使用）
+func (pm *PlayerManager) AddPlayerCache(playerID uint64, username, passwordHash string) {
+	pm.mutex.Lock()
+	defer pm.mutex.Unlock()
+	
+	pm.usernameIndex[username] = playerID
+	pm.playerCache[playerID] = &PlayerCache{
+		Username:     username,
+		PasswordHash: passwordHash,
+	}
 }
 
 // RemovePlayer 移除玩家（离线数据保留 10 分钟）
@@ -140,16 +155,6 @@ func (pm *PlayerManager) RemoveOfflinePlayer(playerID uint64) {
 	defer pm.mutex.Unlock()
 	delete(pm.offlinePlayers, playerID)
 	delete(pm.playerCache, playerID)
-}
-
-// AddPlayerCache 添加玩家缓存（注册时调用，包含密码哈希和用户名）
-func (pm *PlayerManager) AddPlayerCache(playerID uint64, username, passwordHash string) {
-	pm.mutex.Lock()
-	defer pm.mutex.Unlock()
-	pm.playerCache[playerID] = &PlayerCache{
-		Username:     username,
-		PasswordHash: passwordHash,
-	}
 }
 
 // GetPlayerCache 获取玩家缓存（登录时验证密码）
