@@ -19,24 +19,22 @@ type OfflinePlayer struct {
 	LastLogout time.Time
 }
 
-// PlayerCache 玩家缓存数据（用于登录验证）
-type PlayerCache struct {
-	PlayerID     uint64
-	Username     string
-	PasswordHash string
-}
-
 // PlayerManager 玩家管理器
 type PlayerManager struct {
-	players        map[uint64]*session.PlayerInfo      // 在线玩家（一直在内存）
-	sessions       map[uint64]session.Session          // 在线会话
-	offlinePlayers map[uint64]*OfflinePlayer           // 离线玩家（保留 10 分钟）
-	usernameIndex  map[string]uint64                   // 用户名→玩家 ID 索引
-	playerCache    map[uint64]*PlayerCache             // 玩家数据缓存（含密码哈希，保留 10 分钟）
-	offlineTime    map[uint64]time.Time                // 玩家离线时间（用于清理）
+	players        map[uint64]*session.PlayerInfo // 在线玩家（一直在内存）
+	sessions       map[uint64]session.Session     // 在线会话
+	offlinePlayers map[uint64]*OfflinePlayer      // 离线玩家（保留 10 分钟）
+	usernameIndex  map[string]uint64              // 用户名索引
+	playerCache    map[uint64]*PlayerCache        // 玩家数据缓存（含密码哈希，保留 10 分钟）
 	mutex          sync.RWMutex
 	cleanupTicker  *time.Ticker
 	stopChan       chan struct{}
+}
+
+// PlayerCache 玩家缓存数据
+type PlayerCache struct {
+	Username     string
+	PasswordHash string
 }
 
 // NewPlayerManager 创建玩家管理器
@@ -45,9 +43,8 @@ func NewPlayerManager() *PlayerManager {
 		players:        make(map[uint64]*session.PlayerInfo),
 		sessions:       make(map[uint64]session.Session),
 		offlinePlayers: make(map[uint64]*OfflinePlayer),
-		usernameIndex:  make(map[string]uint64),     // 用户名索引
-		playerCache:    make(map[uint64]*PlayerCache), // 玩家数据缓存
-		offlineTime:    make(map[uint64]time.Time),  // 离线时间
+		usernameIndex:  make(map[string]uint64),
+		playerCache:    make(map[uint64]*PlayerCache),
 		stopChan:       make(chan struct{}),
 	}
 
@@ -78,26 +75,14 @@ func (pm *PlayerManager) cleanupExpiredOfflinePlayers() {
 	defer pm.mutex.Unlock()
 
 	now := time.Now()
-	expiredDuration := 10 * time.Minute // 离线 10 分钟后清理
-
-	// 清理离线超过 10 分钟的玩家
-	for playerID, offlineTime := range pm.offlineTime {
-		if now.Sub(offlineTime) > expiredDuration {
-			// 先获取用户名（用于删除索引）
-			var username string
-			if offline, exists := pm.offlinePlayers[playerID]; exists {
-				username = offline.Info.Username
-			}
+	for playerID, offline := range pm.offlinePlayers {
+		if now.Sub(offline.LastLogout) > 10*time.Minute {
 			// 删除离线玩家记录
 			delete(pm.offlinePlayers, playerID)
 			// 删除玩家缓存
 			delete(pm.playerCache, playerID)
 			// 删除用户名索引
-			if username != "" {
-				delete(pm.usernameIndex, username)
-			}
-			// 删除离线时间记录
-			delete(pm.offlineTime, playerID)
+			delete(pm.usernameIndex, offline.Info.Username)
 		}
 	}
 }
@@ -129,7 +114,7 @@ func (pm *PlayerManager) RemovePlayer(playerID uint64) {
 			LastLogout: time.Now(),
 		}
 		// 记录离线时间（用于清理）
-		pm.offlineTime[playerID] = time.Now()
+		pm.playerCache[playerID] = &PlayerCache{}
 		// 从在线列表移除
 		delete(pm.players, playerID)
 	}
@@ -154,25 +139,16 @@ func (pm *PlayerManager) RemoveOfflinePlayer(playerID uint64) {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
 	delete(pm.offlinePlayers, playerID)
-	delete(pm.offlineTime, playerID)
+	delete(pm.playerCache, playerID)
 }
 
-// AddPlayerCache 添加玩家缓存（注册时调用，包含密码哈希）
-// 玩家缓存保留 10 分钟（与离线玩家数据同步清理）
+// AddPlayerCache 添加玩家缓存（注册时调用，包含密码哈希和用户名）
 func (pm *PlayerManager) AddPlayerCache(playerID uint64, username, passwordHash string) {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
-	pm.usernameIndex[username] = playerID
 	pm.playerCache[playerID] = &PlayerCache{
-		PlayerID:     playerID,
 		Username:     username,
 		PasswordHash: passwordHash,
-	}
-	// 如果是离线玩家，记录离线时间（用于清理）
-	if _, exists := pm.offlinePlayers[playerID]; exists {
-		if _, timeExists := pm.offlineTime[playerID]; !timeExists {
-			pm.offlineTime[playerID] = time.Now()
-		}
 	}
 }
 
@@ -182,31 +158,6 @@ func (pm *PlayerManager) GetPlayerCache(playerID uint64) (*PlayerCache, bool) {
 	defer pm.mutex.RUnlock()
 	cache, exists := pm.playerCache[playerID]
 	return cache, exists
-}
-
-// GetPlayerIDByUsername 通过用户名获取玩家 ID（登录时先用）
-func (pm *PlayerManager) GetPlayerIDByUsername(username string) (uint64, bool) {
-	pm.mutex.RLock()
-	defer pm.mutex.RUnlock()
-	playerID, exists := pm.usernameIndex[username]
-	return playerID, exists
-}
-
-// Stop 停止玩家管理器
-func (pm *PlayerManager) Stop() {
-	close(pm.stopChan)
-	pm.cleanupTicker.Stop()
-}
-
-// UpdatePlayerPosition 更新玩家位置
-func (pm *PlayerManager) UpdatePlayerPosition(playerID uint64, x, y int32) {
-	pm.mutex.Lock()
-	defer pm.mutex.Unlock()
-
-	if player, exists := pm.players[playerID]; exists {
-		player.X = x
-		player.Y = y
-	}
 }
 
 // GetPlayer 获取玩家信息
@@ -221,6 +172,7 @@ func (pm *PlayerManager) GetPlayer(playerID uint64) *session.PlayerInfo {
 func (pm *PlayerManager) GetSession(playerID uint64) session.Session {
 	pm.mutex.RLock()
 	defer pm.mutex.RUnlock()
+
 	return pm.sessions[playerID]
 }
 
@@ -228,14 +180,26 @@ func (pm *PlayerManager) GetSession(playerID uint64) session.Session {
 func (pm *PlayerManager) GetPlayerCount() int {
 	pm.mutex.RLock()
 	defer pm.mutex.RUnlock()
+	return len(pm.players)
+}
 
-	count := 0
-	for _, player := range pm.players {
-		if player.Online {
-			count++
-		}
+// UpdatePlayerPosition 更新玩家位置
+func (pm *PlayerManager) UpdatePlayerPosition(playerID uint64, x, y int32) {
+	pm.mutex.Lock()
+	defer pm.mutex.Unlock()
+
+	if player, exists := pm.players[playerID]; exists {
+		player.X = x
+		player.Y = y
 	}
-	return count
+}
+
+// GetPlayerIDByUsername 通过用户名获取玩家 ID
+func (pm *PlayerManager) GetPlayerIDByUsername(username string) (uint64, bool) {
+	pm.mutex.RLock()
+	defer pm.mutex.RUnlock()
+	playerID, exists := pm.usernameIndex[username]
+	return playerID, exists
 }
 
 // GetAllPlayers 获取所有在线玩家
@@ -243,11 +207,15 @@ func (pm *PlayerManager) GetAllPlayers() []interface{} {
 	pm.mutex.RLock()
 	defer pm.mutex.RUnlock()
 
-	var players []interface{}
+	players := make([]interface{}, 0, len(pm.players))
 	for _, player := range pm.players {
-		if player.Online {
-			players = append(players, player)
-		}
+		players = append(players, player)
 	}
 	return players
+}
+
+// Stop 停止玩家管理器
+func (pm *PlayerManager) Stop() {
+	close(pm.stopChan)
+	pm.cleanupTicker.Stop()
 }
