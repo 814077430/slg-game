@@ -14,7 +14,17 @@ import (
 	"slg-game/network"
 	pb "slg-game/protocol"
 	"slg-game/protocol"
+	sessionPkg "slg-game/session"
 )
+
+// PlayerManager 接口（避免循环导入）
+type PlayerManager interface {
+	AddPlayer(playerID uint64, username string, session sessionPkg.Session)
+	RemovePlayer(playerID uint64)
+	UpdatePlayerPosition(playerID uint64, x, y int32)
+	GetSession(playerID uint64) sessionPkg.Session
+	GetAllPlayers() []interface{}
+}
 
 const (
 	MsgID_C2S_LoginRequest     = 1001
@@ -36,16 +46,16 @@ const (
 )
 
 type MessageRouter struct {
-	handlers     map[uint32]func(*PlayerSession, []byte) *network.Packet
+	handlers     map[uint32]func(sessionPkg.Session, []byte) *network.Packet
 	db           database.DB
-	playerMgr    *PlayerManager
+	playerMgr    PlayerManager
 	chatMgr      *chat.ChatManager
 	nextPlayerID int64
 }
 
-func NewMessageRouter(db database.DB, playerMgr *PlayerManager, chatMgr *chat.ChatManager) *MessageRouter {
+func NewMessageRouter(db database.DB, playerMgr PlayerManager, chatMgr *chat.ChatManager) *MessageRouter {
 	router := &MessageRouter{
-		handlers:     make(map[uint32]func(*PlayerSession, []byte) *network.Packet),
+		handlers:     make(map[uint32]func(sessionPkg.Session, []byte) *network.Packet),
 		db:           db,
 		playerMgr:    playerMgr,
 		chatMgr:      chatMgr,
@@ -80,7 +90,7 @@ func (mr *MessageRouter) registerHandlers() {
 	mr.handlers[MsgID_C2S_ChatRequest] = mr.handleChatRequest
 }
 
-func (mr *MessageRouter) Route(session *PlayerSession, packet *network.Packet) *network.Packet {
+func (mr *MessageRouter) Route(session sessionPkg.Session, packet *network.Packet) *network.Packet {
 	handler, exists := mr.handlers[packet.MsgID]
 	if !exists {
 		log.Warnf("Unknown message ID: %d", packet.MsgID)
@@ -97,7 +107,7 @@ func hashPassword(password string) string {
 }
 
 // handleLoginRequest 处理登录请求
-func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte) *network.Packet {
+func (mr *MessageRouter) handleLoginRequest(session sessionPkg.Session, data []byte) *network.Packet {
 	request := &pb.C2S_LoginRequest{}
 	if err := protocol.Unmarshal(data, request); err != nil {
 		log.Errorf("Failed to unmarshal login request: %v", err)
@@ -184,7 +194,7 @@ func (mr *MessageRouter) handleLoginRequest(session *PlayerSession, data []byte)
 }
 
 // handleRegisterRequest 处理注册请求
-func (mr *MessageRouter) handleRegisterRequest(session *PlayerSession, data []byte) *network.Packet {
+func (mr *MessageRouter) handleRegisterRequest(session sessionPkg.Session, data []byte) *network.Packet {
 	request := &pb.C2S_RegisterRequest{}
 	if err := protocol.Unmarshal(data, request); err != nil {
 		log.Errorf("Failed to unmarshal register request: %v", err)
@@ -270,7 +280,7 @@ func (mr *MessageRouter) handleRegisterRequest(session *PlayerSession, data []by
 }
 
 // handleMoveRequest 处理移动请求
-func (mr *MessageRouter) handleMoveRequest(session *PlayerSession, data []byte) *network.Packet {
+func (mr *MessageRouter) handleMoveRequest(session sessionPkg.Session, data []byte) *network.Packet {
 	if !session.IsLoggedIn() {
 		return createMoveErrorResponse(errors.ErrNotLoggedInErr)
 	}
@@ -321,7 +331,7 @@ func (mr *MessageRouter) handleMoveRequest(session *PlayerSession, data []byte) 
 }
 
 // handleBuildRequest 处理建造请求
-func (mr *MessageRouter) handleBuildRequest(session *PlayerSession, data []byte) *network.Packet {
+func (mr *MessageRouter) handleBuildRequest(session sessionPkg.Session, data []byte) *network.Packet {
 	if !session.IsLoggedIn() {
 		return createBuildErrorResponse(errors.ErrNotLoggedInErr)
 	}
@@ -369,25 +379,37 @@ func (mr *MessageRouter) handleBuildRequest(session *PlayerSession, data []byte)
 }
 
 // handleWhoRequest 处理视野内玩家列表请求
-func (mr *MessageRouter) handleWhoRequest(session *PlayerSession, data []byte) *network.Packet {
+func (mr *MessageRouter) handleWhoRequest(session sessionPkg.Session, data []byte) *network.Packet {
 	if !session.IsLoggedIn() {
 		return createWhoErrorResponse(errors.ErrNotLoggedInErr)
 	}
 
 	playerID := session.GetPlayerID()
 	
-	// 获取视野内的玩家
-	visiblePlayers := mr.playerMgr.GetPlayersInVision(playerID)
+	// TODO: 获取视野内的玩家（应该调用 world 模块）
+	// 暂时返回所有在线玩家
+	sessionInfo := mr.playerMgr.GetSession(playerID)
+	if sessionInfo == nil {
+		return createWhoErrorResponse(errors.NewError(errors.ErrInternalErr.Code, "Session not found"))
+	}
+	
+	// 获取所有玩家（临时实现）
+	allPlayers := mr.playerMgr.GetAllPlayers()
 	
 	// 构建响应
-	players := make([]*pb.WhoPlayerInfo, 0, len(visiblePlayers))
-	for _, p := range visiblePlayers {
-		players = append(players, &pb.WhoPlayerInfo{
-			PlayerId: p.ID,
-			Username: p.Username,
-			X:        p.X,
-			Y:        p.Y,
-		})
+	players := make([]*pb.WhoPlayerInfo, 0, len(allPlayers))
+	for _, p := range allPlayers {
+		if playerInfo, ok := p.(*sessionPkg.PlayerInfo); ok {
+			if playerInfo.ID == playerID || !playerInfo.Online {
+				continue
+			}
+			players = append(players, &pb.WhoPlayerInfo{
+				PlayerId: playerInfo.ID,
+				Username: playerInfo.Username,
+				X:        playerInfo.X,
+				Y:        playerInfo.Y,
+			})
+		}
 	}
 	
 	response := &pb.S2C_WhoResponse{
@@ -409,86 +431,20 @@ func (mr *MessageRouter) handleWhoRequest(session *PlayerSession, data []byte) *
 
 // notifyPlayerEnter 通知视野内玩家有新玩家进入
 func (mr *MessageRouter) notifyPlayerEnter(playerID uint64, x, y int32) {
-	if mr.playerMgr == nil {
-		return
-	}
-	
-	// 获取视野内的其他玩家
-	visiblePlayers := mr.playerMgr.GetPlayersInVision(playerID)
-	
-	notification := &pb.PlayerEnterNotification{
-		PlayerId: playerID,
-		X:        x,
-		Y:        y,
-	}
-	data, _ := protocol.Marshal(notification)
-	
-	// 通知视野内的玩家
-	for _, p := range visiblePlayers {
-		session := mr.playerMgr.GetSession(p.ID)
-		if session != nil {
-			if ps, ok := session.(*PlayerSession); ok && ps != nil {
-				ps.SendPacket(&network.Packet{
-					MsgID: MsgID_S2C_PlayerEnter,
-					Data:  data,
-				})
-			}
-		}
-	}
+	// 视野逻辑已移到 world 模块
+	// TODO: 通过 world.GetPlayersInVision() 获取视野内玩家
 }
 
 // notifyPlayerLeave 通知视野内玩家有玩家离开
 func (mr *MessageRouter) notifyPlayerLeave(playerID uint64) {
-	if mr.playerMgr == nil {
-		return
-	}
-	
-	visiblePlayers := mr.playerMgr.GetPlayersInVision(playerID)
-	
-	notification := &pb.PlayerLeaveNotification{
-		PlayerId: playerID,
-	}
-	data, _ := protocol.Marshal(notification)
-	
-	for _, p := range visiblePlayers {
-		session := mr.playerMgr.GetSession(p.ID)
-		if session != nil {
-			if ps, ok := session.(*PlayerSession); ok && ps != nil {
-				ps.SendPacket(&network.Packet{
-					MsgID: MsgID_S2C_PlayerLeave,
-					Data:  data,
-				})
-			}
-		}
-	}
+	// 视野逻辑已移到 world 模块
+	// TODO: 通过 world.GetPlayersInVision() 获取视野内玩家
 }
 
 // notifyPlayerMove 通知视野内玩家移动
 func (mr *MessageRouter) notifyPlayerMove(playerID uint64, x, y int32) {
-	if mr.playerMgr == nil {
-		return
-	}
-	
-	visiblePlayers := mr.playerMgr.GetPlayersInVision(playerID)
-	
-	notification := &pb.PlayerMoveNotification{
-		PlayerId: playerID,
-		X:        x,
-		Y:        y,
-	}
-	data, _ := protocol.Marshal(notification)
-	
-	for _, p := range visiblePlayers {
-		session := mr.playerMgr.GetSession(p.ID)
-		if session != nil {
-			if ps, ok := session.(*PlayerSession); ok && ps != nil {
-				ps.SendPacket(&network.Packet{
-					MsgID: MsgID_S2C_PlayerMove,
-					Data:  data,
-				})
-			}
-		}
-	}
+	// 视野逻辑已移到 world 模块
+	// TODO: 通过 world.GetPlayersInVision() 获取视野内玩家
 }
 
 // 错误响应辅助函数
@@ -563,7 +519,7 @@ func createWhoErrorResponse(errDetail *errors.ErrorDetail) *network.Packet {
 }
 
 // handleChatRequest 处理聊天消息
-func (mr *MessageRouter) handleChatRequest(session *PlayerSession, data []byte) *network.Packet {
+func (mr *MessageRouter) handleChatRequest(session sessionPkg.Session, data []byte) *network.Packet {
 	if !session.IsLoggedIn() {
 		return createChatErrorResponse(errors.ErrNotLoggedInErr)
 	}

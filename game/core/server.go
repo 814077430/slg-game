@@ -24,7 +24,7 @@ type GameServer struct {
 	router   *handler.MessageRouter
 	gameLoop *GameLoop
 	world    *world.World
-	players  *handler.PlayerManager
+	players  *PlayerManager
 	chatMgr  *chat.ChatManager
 	
 	// 模块管理器
@@ -39,8 +39,8 @@ func NewGameServer(db database.DB, cfg *config.Config) *GameServer {
 	// 创建世界实例（独立线程）
 	world := world.NewWorld(db)
 
-	// 创建玩家管理器（视野范围 10 格）
-	players := handler.NewPlayerManager(10)
+	// 创建玩家管理器
+	players := NewPlayerManager()
 
 	// 创建聊天管理器（独立线程）
 	chatMgr := chat.NewChatManager(players)

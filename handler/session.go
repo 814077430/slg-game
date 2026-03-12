@@ -8,9 +8,11 @@ import (
 	"slg-game/database"
 	"slg-game/log"
 	"slg-game/network"
+	"slg-game/session"
 )
 
-type PlayerSession struct {
+// sessionImpl session.Session 实现
+type sessionImpl struct {
 	connection  *network.Connection
 	db          database.DB
 	config      *config.Config
@@ -21,12 +23,12 @@ type PlayerSession struct {
 	lastActive  time.Time
 	x           int32
 	y           int32
-	playerMgr   *PlayerManager
+	playerMgr   PlayerManager
 	mutex       sync.RWMutex
 }
 
-func NewPlayerSession(conn *network.Connection, db database.DB, config *config.Config, playerMgr *PlayerManager) *PlayerSession {
-	return &PlayerSession{
+func NewPlayerSession(conn *network.Connection, db database.DB, config *config.Config, playerMgr PlayerManager) session.Session {
+	return &sessionImpl{
 		connection: conn,
 		db:         db,
 		config:     config,
@@ -35,37 +37,37 @@ func NewPlayerSession(conn *network.Connection, db database.DB, config *config.C
 	}
 }
 
-func (ps *PlayerSession) GetPlayerID() uint64 {
+func (ps *sessionImpl) GetPlayerID() uint64 {
 	ps.mutex.RLock()
 	defer ps.mutex.RUnlock()
 	return ps.playerID
 }
 
-func (ps *PlayerSession) SetPlayerID(playerID uint64) {
+func (ps *sessionImpl) SetPlayerID(playerID uint64) {
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
 	ps.playerID = playerID
 }
 
-func (ps *PlayerSession) GetUsername() string {
+func (ps *sessionImpl) GetUsername() string {
 	ps.mutex.RLock()
 	defer ps.mutex.RUnlock()
 	return ps.username
 }
 
-func (ps *PlayerSession) SetUsername(username string) {
+func (ps *sessionImpl) SetUsername(username string) {
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
 	ps.username = username
 }
 
-func (ps *PlayerSession) IsLoggedIn() bool {
+func (ps *sessionImpl) IsLoggedIn() bool {
 	ps.mutex.RLock()
 	defer ps.mutex.RUnlock()
 	return ps.isLoggedIn
 }
 
-func (ps *PlayerSession) SetLoggedIn(loggedIn bool) {
+func (ps *sessionImpl) SetLoggedIn(loggedIn bool) {
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
 	if loggedIn && !ps.isLoggedIn {
@@ -79,17 +81,17 @@ func (ps *PlayerSession) SetLoggedIn(loggedIn bool) {
 	ps.lastActive = time.Now()
 }
 
-func (ps *PlayerSession) SendPacket(packet *network.Packet) error {
+func (ps *sessionImpl) SendPacket(packet *network.Packet) error {
 	return ps.connection.SendPacket(packet)
 }
 
-func (ps *PlayerSession) UpdateLastActive() {
+func (ps *sessionImpl) UpdateLastActive() {
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
 	ps.lastActive = time.Now()
 }
 
-func (ps *PlayerSession) GetSessionDuration() time.Duration {
+func (ps *sessionImpl) GetSessionDuration() time.Duration {
 	ps.mutex.RLock()
 	defer ps.mutex.RUnlock()
 	if ps.loginTime.IsZero() {
@@ -99,14 +101,14 @@ func (ps *PlayerSession) GetSessionDuration() time.Duration {
 }
 
 // GetPosition 获取玩家位置
-func (ps *PlayerSession) GetPosition() (int32, int32) {
+func (ps *sessionImpl) GetPosition() (int32, int32) {
 	ps.mutex.RLock()
 	defer ps.mutex.RUnlock()
 	return ps.x, ps.y
 }
 
 // SetPosition 设置玩家位置
-func (ps *PlayerSession) SetPosition(x, y int32) {
+func (ps *sessionImpl) SetPosition(x, y int32) {
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
 	ps.x = x
@@ -117,7 +119,7 @@ func (ps *PlayerSession) SetPosition(x, y int32) {
 }
 
 // Cleanup 清理会话资源
-func (ps *PlayerSession) Cleanup() {
+func (ps *sessionImpl) Cleanup() {
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
 
@@ -126,7 +128,7 @@ func (ps *PlayerSession) Cleanup() {
 		log.WithFields(map[string]interface{}{
 			"player_id": ps.playerID,
 			"username":  ps.username,
-			"duration":  duration.String(),
+			"duration":  duration,
 		}).Info("Cleaning up session")
 
 		// 从玩家管理器移除

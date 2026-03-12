@@ -5,28 +5,20 @@ import (
 	"sync"
 	"time"
 
-	"slg-game/network"
+	sessionPkg "slg-game/session"
 )
-
-// PlayerSession 玩家会话接口（避免循环导入）
-type PlayerSession interface {
-	IsLoggedIn() bool
-	GetPlayerID() uint64
-	GetUsername() string
-	SendPacket(packet *network.Packet) error
-}
 
 // PlayerManager 玩家管理器接口
 type PlayerManager interface {
-	GetSession(playerID uint64) interface{}
+	GetSession(playerID uint64) sessionPkg.Session
 	GetPlayerCount() int
 	GetAllPlayers() []interface{}
 }
 
 const (
-	MsgID_C2S_ChatRequest = 1010
-	MsgID_S2C_ChatResponse = 2010
-	MsgID_S2C_ChatBroadcast = 2011
+	MsgID_C2S_ChatRequest      = 1010
+	MsgID_S2C_ChatResponse     = 2010
+	MsgID_S2C_ChatBroadcast    = 2011
 )
 
 // ChatMessage 聊天消息
@@ -51,7 +43,7 @@ type ChatManager struct {
 
 // ClientMessage 客户端消息
 type ClientMessage struct {
-	Session PlayerSession
+	Session sessionPkg.Session
 	Message *ChatMessage
 }
 
@@ -131,7 +123,7 @@ func (cm *ChatManager) broadcastMessage(msg *ChatMessage) {
 }
 
 // SendChat 发送聊天消息
-func (cm *ChatManager) SendChat(session PlayerSession, content, channel string) {
+func (cm *ChatManager) SendChat(session sessionPkg.Session, content, channel string) {
 	playerID := session.GetPlayerID()
 	username := session.GetUsername()
 
@@ -158,8 +150,6 @@ func (cm *ChatManager) GetHistory() []*ChatMessage {
 // addToHistory 添加到历史记录
 func (cm *ChatManager) addToHistory(msg *ChatMessage) {
 	cm.history = append(cm.history, msg)
-
-	// 限制历史记录数量
 	if len(cm.history) > cm.maxHistory {
 		cm.history = cm.history[1:]
 	}
@@ -167,20 +157,8 @@ func (cm *ChatManager) addToHistory(msg *ChatMessage) {
 
 // cleanupHistory 清理过期历史
 func (cm *ChatManager) cleanupHistory() {
-	// 只保留最近 5 分钟的消息
-	now := time.Now().UnixMilli()
-	cutoff := now - 5*60*1000 // 5 分钟前
-
-	newHistory := make([]*ChatMessage, 0)
-	for _, msg := range cm.history {
-		if msg.Timestamp > cutoff {
-			newHistory = append(newHistory, msg)
-		}
+	// 简单实现：保留最近 50 条
+	if len(cm.history) > cm.maxHistory {
+		cm.history = cm.history[len(cm.history)-cm.maxHistory:]
 	}
-	cm.history = newHistory
-}
-
-// GetOnlineCount 获取在线玩家数
-func (cm *ChatManager) GetOnlineCount() int {
-	return cm.playerMgr.GetPlayerCount()
 }
