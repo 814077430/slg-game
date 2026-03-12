@@ -53,27 +53,48 @@ func main() {
 		go func(clientID int) {
 			defer wg.Done()
 			result := runClient(clientID)
-			clientResults <- result
+			select {
+			case clientResults <- result:
+			default:
+				// Channel full, skip
+			}
 		}(i)
 
 		if *rampUpTime > 0 {
-			time.Sleep(time.Duration(*rampUpTime*1000/*clientCount*/) * time.Millisecond)
+			time.Sleep(time.Duration(*rampUpTime*1000/(*clientCount)) * time.Millisecond)
 		}
 	}
 
+	// Wait for all clients to complete
+	done := make(chan struct{})
 	go func() {
 		wg.Wait()
-		close(clientResults)
+		close(done)
 	}()
 
+	// Collect results with timeout
+	timeout := time.After(120 * time.Second)
 	var totalSuccess, totalFailed int
 	var totalLat int64
-	for result := range clientResults {
-		totalSuccess += result.Success
-		totalFailed += result.Failed
-		totalLat += result.TotalLatency
+	collected := 0
+
+	for collected < *clientCount {
+		select {
+		case result := <-clientResults:
+			totalSuccess += result.Success
+			totalFailed += result.Failed
+			totalLat += result.TotalLatency
+			collected++
+		case <-done:
+			// All clients finished
+			goto printResults
+		case <-timeout:
+			fmt.Println("\n⚠️  Test timeout!")
+			goto printResults
+		}
 	}
 
+printResults:
 	printStatistics(totalSuccess, totalFailed, totalLat)
 }
 
