@@ -6,11 +6,13 @@ import (
 	"time"
 
 	"slg-game/database"
+	"slg-game/messenger"
 )
 
 // BattleManager 战斗管理器（独立线程）
 type BattleManager struct {
 	db           database.DB
+	messageBus   *messenger.MessageBus
 	tickInterval time.Duration
 	stopChan     chan struct{}
 	wg           sync.WaitGroup
@@ -28,7 +30,7 @@ type BattleQueueItem struct {
 }
 
 // NewBattleManager 创建战斗管理器
-func NewBattleManager(db database.DB) *BattleManager {
+func NewBattleManager(db database.DB, messageBus *messenger.MessageBus) *BattleManager {
 	return &BattleManager{
 		db:           db,
 		tickInterval: 1000 * time.Millisecond, // 1 秒

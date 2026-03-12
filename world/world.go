@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"slg-game/database"
+	"slg-game/messenger"
 )
 
 // 世界尺寸常量
@@ -81,6 +82,7 @@ const (
 // World 游戏世界
 type World struct {
 	db            database.DB
+	messageBus    *messenger.MessageBus
 	tiles         map[WorldCoord]*WorldTile
 	players       map[uint64]map[string]interface{}
 	mutex         sync.RWMutex
@@ -114,9 +116,10 @@ type WorldTile struct {
 }
 
 // NewWorld 创建世界实例
-func NewWorld(db database.DB) *World {
+func NewWorld(db database.DB, messageBus *messenger.MessageBus) *World {
 	world := &World{
 		db:           db,
+		messageBus:   messageBus,
 		tiles:        make(map[WorldCoord]*WorldTile),
 		players:      make(map[uint64]map[string]interface{}),
 		stopChan:     make(chan struct{}),

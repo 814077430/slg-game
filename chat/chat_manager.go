@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"slg-game/errors"
+	"slg-game/messenger"
 	"slg-game/network"
 	pb "slg-game/protocol"
 	"slg-game/protocol"
@@ -54,7 +55,7 @@ type ClientMessage struct {
 }
 
 // NewChatManager 创建聊天管理器
-func NewChatManager(playerMgr PlayerManager) *ChatManager {
+func NewChatManager(playerMgr PlayerManager, messageBus *messenger.MessageBus) *ChatManager {
 	return &ChatManager{
 		playerMgr:   playerMgr,
 		messageChan: make(chan *ChatMessage, 1000),

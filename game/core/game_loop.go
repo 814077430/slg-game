@@ -6,11 +6,13 @@ import (
 	"time"
 
 	"slg-game/database"
+	"slg-game/messenger"
 )
 
 // GameLoop 游戏主循环（不包含 World）
 type GameLoop struct {
 	db            database.DB
+	messageBus    *messenger.MessageBus
 	tickInterval  time.Duration
 	tickCount     uint64
 	stopChan      chan struct{}
@@ -18,7 +20,7 @@ type GameLoop struct {
 }
 
 // NewGameLoop 创建游戏主循环
-func NewGameLoop(db database.DB, tickInterval time.Duration) *GameLoop {
+func NewGameLoop(db database.DB, tickInterval time.Duration, messageBus *messenger.MessageBus) *GameLoop {
 	return &GameLoop{
 		db:           db,
 		tickInterval: tickInterval,

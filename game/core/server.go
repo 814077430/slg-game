@@ -16,6 +16,7 @@ import (
 	"slg-game/game/tech"
 	"slg-game/chat"
 	"slg-game/handler"
+	"slg-game/messenger"
 )
 
 type GameServer struct {
@@ -27,6 +28,7 @@ type GameServer struct {
 	players     *PlayerManager
 	chatMgr     *chat.ChatManager
 	mongoWriter *database.MongoAsyncWriter
+	messageBus  *messenger.MessageBus  // 消息总线
 	
 	// 模块管理器
 	buildingMgr  *city.BuildingManager
@@ -41,6 +43,9 @@ type GameServer struct {
 }
 
 func NewGameServer(db database.DB, cfg *config.Config) *GameServer {
+	// 创建消息总线
+	messageBus := messenger.NewMessageBus()
+
 	// 创建 MongoDB 异步写入器（100 条或 100ms 批量写入）
 	var mongoWriter *database.MongoAsyncWriter
 	if _, ok := db.(*database.MongoDatabase); ok {
@@ -54,13 +59,13 @@ func NewGameServer(db database.DB, cfg *config.Config) *GameServer {
 	}
 
 	// 创建世界实例（独立线程）
-	world := world.NewWorld(db)
+	world := world.NewWorld(db, messageBus)
 
 	// 创建玩家管理器（传入 MongoDB 异步写入器）
 	players := NewPlayerManager(mongoWriter)
 
 	// 创建聊天管理器（独立线程）
-	chatMgr := chat.NewChatManager(players)
+	chatMgr := chat.NewChatManager(players, messageBus)
 
 	// 创建协议处理器
 	coreHandler := NewCoreHandler(db, players)
@@ -75,12 +80,12 @@ func NewGameServer(db database.DB, cfg *config.Config) *GameServer {
 
 	// 创建游戏主循环（独立线程）
 	tickInterval := time.Duration(cfg.Game.TickInterval) * time.Millisecond
-	gameLoop := NewGameLoop(db, tickInterval)
+	gameLoop := NewGameLoop(db, tickInterval, messageBus)
 
 	// 初始化各模块管理器
 	buildingMgr := city.NewBuildingManager(db)
 	resourceMgr := resource.NewResourceManager(db)
-	battleMgr := battle.NewBattleManager(db)
+	battleMgr := battle.NewArmyManager(db, messageBus).GetBattleManager()
 	allianceMgr := alliance.NewAllianceManager(db)
 	techMgr := tech.NewTechnologyManager(db)
 
@@ -99,6 +104,7 @@ func NewGameServer(db database.DB, cfg *config.Config) *GameServer {
 		players:      players,
 		chatMgr:      chatMgr,
 		mongoWriter:  mongoWriter,
+		messageBus:   messageBus,
 		buildingMgr:  buildingMgr,
 		resourceMgr:  resourceMgr,
 		battleMgr:    battleMgr,
@@ -144,6 +150,11 @@ func (gs *GameServer) HandleClient(conn net.Conn) {
 // Shutdown 优雅关闭服务器
 func (gs *GameServer) Shutdown() {
 	log.Println("Shutting down server...")
+	
+	// 停止消息总线
+	if gs.messageBus != nil {
+		gs.messageBus.Stop()
+	}
 	
 	// 停止所有独立线程
 	if gs.gameLoop != nil {

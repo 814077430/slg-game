@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"slg-game/database"
+	"slg-game/messenger"
 )
 
 // ArmyManager 军队管理器
@@ -14,12 +15,12 @@ type ArmyManager struct {
 }
 
 // NewArmyManager 创建军队管理器
-func NewArmyManager(db database.DB) *ArmyManager {
+func NewArmyManager(db database.DB, messageBus *messenger.MessageBus) *ArmyManager {
 	am := &ArmyManager{
 		db: db,
 	}
 	// 创建并启动战斗管理器（独立线程）
-	am.battleMgr = NewBattleManager(db)
+	am.battleMgr = NewBattleManager(db, messageBus)
 	am.battleMgr.StartLoop()
 	return am
 }
