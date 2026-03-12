@@ -187,6 +187,20 @@ go build -o slg-server .
 ./slg-server
 ```
 
+### 4.5 使用启动脚本（推荐）
+
+```bash
+# 一键启动 MongoDB 和游戏服务器
+./start.sh
+
+# 停止服务
+./stop.sh
+
+# 查看日志
+tail -f logs/server.log
+tail -f logs/mongod.log
+```
+
 ### 5. 测试连接
 
 使用 TCP 客户端连接测试：
