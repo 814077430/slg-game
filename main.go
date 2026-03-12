@@ -25,39 +25,20 @@ func main() {
 	}
 	log.Info("✓ Config loaded")
 
-	// 使用 MongoDB + Redis 缓存（数据持久化 + 高性能）
+	// 使用 MongoDB（数据持久化 + 连接池优化 + 批量写入）
 	var db database.DB
 	
-	// 尝试初始化带 Redis 缓存的数据库
-	cachedDB, err := database.InitMongoDBWithCache(
-		"mongodb://localhost:27017", // MongoDB
-		"slg_game",
-		"localhost:6379", // Redis
-		"",               // Redis 密码
-		0,                // Redis DB
-	)
-	
+	mongoDB, err := database.InitMongoDB("mongodb://localhost:27017", "slg_game")
 	if err != nil {
-		log.Warnf("Redis cache unavailable: %v", err)
-		log.Warn("Falling back to MongoDB only...")
-		
-		// 回退到纯 MongoDB
-		mongoDB, err := database.InitMongoDB("mongodb://localhost:27017", "slg_game")
-		if err != nil {
-			log.Warnf("MongoDB connection failed: %v", err)
-			log.Warn("Falling back to memory database")
-			db = database.NewMemoryDB()
-			log.Info("✓ Memory database initialized")
-		} else {
-			db = mongoDB
-			log.Info("✓ MongoDB connected (no cache)")
-			log.Info("  Database: slg_game")
-		}
+		log.Warnf("MongoDB connection failed: %v", err)
+		log.Warn("Falling back to memory database")
+		db = database.NewMemoryDB()
+		log.Info("✓ Memory database initialized")
 	} else {
-		db = cachedDB
-		log.Info("✓ MongoDB + Redis cache connected")
+		db = mongoDB
+		log.Info("✓ MongoDB connected successfully")
 		log.Info("  Database: slg_game")
-		log.Info("  Cache: localhost:6379")
+		log.Info("  Connection pool: Max 50, Min 10")
 		log.Info("  Data will be persisted across restarts")
 	}
 	defer db.Disconnect()

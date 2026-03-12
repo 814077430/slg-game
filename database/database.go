@@ -8,7 +8,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"slg-game/cache"
 )
 
 // DB 数据库接口
@@ -42,28 +41,20 @@ type MemoryCollection struct {
 
 // MongoDatabase MongoDB 实现
 type MongoDatabase struct {
-	client     *mongo.Client
-	db         *mongo.Database
+	client      *mongo.Client
+	db          *mongo.Database
 	collections map[string]*MongoCollection
-	cache      *cache.PlayerCache
-	mutex      sync.RWMutex
+	mutex       sync.RWMutex
 }
 
 // MongoCollection MongoDB 集合实现
 type MongoCollection struct {
 	collection *mongo.Collection
-	cache      *cache.PlayerCache
 }
 
 // GetMongoCollection 获取底层 MongoDB collection（用于批量写入）
 func (c *MongoCollection) GetMongoCollection() *mongo.Collection {
 	return c.collection
-}
-
-// CachedDatabase 带缓存的数据库（包装 MongoDatabase）
-type CachedDatabase struct {
-	mongo *MongoDatabase
-	cache *cache.PlayerCache
 }
 
 // NewMemoryDB 创建内存数据库
@@ -133,28 +124,7 @@ func InitMongoDB(uri, dbName string) (*MongoDatabase, error) {
 	}, nil
 }
 
-// InitMongoDBWithCache 初始化 MongoDB 连接并启用 Redis 缓存
-func InitMongoDBWithCache(mongoURI, dbName, redisAddr, redisPassword string, redisDB int) (*CachedDatabase, error) {
-	// 初始化 MongoDB
-	mongoDB, err := InitMongoDB(mongoURI, dbName)
-	if err != nil {
-		return nil, err
-	}
 
-	// 初始化 Redis 缓存
-	playerCache := cache.NewPlayerCache(redisAddr, redisPassword, redisDB)
-
-	// 测试 Redis 连接
-	if err := playerCache.Ping(); err != nil {
-		// Redis 不可用，回退到纯 MongoDB
-		return nil, err
-	}
-
-	return &CachedDatabase{
-		mongo: mongoDB,
-		cache: playerCache,
-	}, nil
-}
 
 func (m *MongoDatabase) GetCollection(name string) Collection {
 	m.mutex.Lock()
@@ -166,7 +136,6 @@ func (m *MongoDatabase) GetCollection(name string) Collection {
 
 	collection := &MongoCollection{
 		collection: m.db.Collection(name),
-		cache:      nil, // 不使用缓存
 	}
 	m.collections[name] = collection
 	return collection
@@ -179,26 +148,6 @@ func (m *MongoDatabase) Disconnect() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return m.client.Disconnect(ctx)
-}
-
-// GetCollection 获取集合（带缓存）
-func (c *CachedDatabase) GetCollection(name string) Collection {
-	if name == "players" {
-		// 玩家集合使用缓存
-		return &MongoCollection{
-			collection: c.mongo.db.Collection(name),
-			cache:      c.cache,
-		}
-	}
-	// 其他集合不使用缓存
-	return c.mongo.GetCollection(name)
-}
-
-func (c *CachedDatabase) Disconnect() error {
-	if c.cache != nil {
-		c.cache.Close()
-	}
-	return c.mongo.Disconnect()
 }
 
 // MemoryCollection 方法实现
