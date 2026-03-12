@@ -81,8 +81,12 @@ func (ps *sessionImpl) SetLoggedIn(loggedIn bool) {
 	ps.lastActive = time.Now()
 }
 
-func (ps *sessionImpl) SendPacket(packet *network.Packet) error {
-	return ps.connection.SendPacket(packet)
+func (ps *sessionImpl) SendPacket(packet session.Packet) error {
+	pkt, ok := packet.(*network.Packet)
+	if !ok {
+		return nil
+	}
+	return ps.connection.SendPacket(pkt)
 }
 
 func (ps *sessionImpl) UpdateLastActive() {

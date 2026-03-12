@@ -17,6 +17,16 @@ type Packet struct {
 	Data  []byte
 }
 
+// GetMsgID 获取消息 ID（实现 session.Packet 接口）
+func (p *Packet) GetMsgID() uint32 {
+	return p.MsgID
+}
+
+// GetData 获取数据（实现 session.Packet 接口）
+func (p *Packet) GetData() []byte {
+	return p.Data
+}
+
 // Encode serializes the packet with protobuf header
 func (p *Packet) Encode() []byte {
 	buf := make([]byte, HeaderSize+len(p.Data))

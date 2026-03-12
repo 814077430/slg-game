@@ -1,6 +1,10 @@
 package session
 
-import "slg-game/network"
+// Packet 数据包接口（避免循环导入）
+type Packet interface {
+	GetMsgID() uint32
+	GetData() []byte
+}
 
 // Session 玩家会话接口（定义在独立包中避免循环导入）
 type Session interface {
@@ -11,7 +15,7 @@ type Session interface {
 	SetUsername(string)
 	SetLoggedIn(bool)
 	SetPosition(x, y int32)
-	SendPacket(packet *network.Packet) error
+	SendPacket(packet Packet) error
 	Cleanup()
 }
 

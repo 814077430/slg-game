@@ -21,7 +21,7 @@ import (
 type GameServer struct {
 	db       database.DB
 	config   *config.Config
-	router   *handler.MessageRouter
+	router   *network.Router
 	gameLoop *GameLoop
 	world    *world.World
 	players  *PlayerManager
@@ -33,6 +33,10 @@ type GameServer struct {
 	battleMgr    *battle.BattleManager
 	allianceMgr  *alliance.AllianceManager
 	techMgr      *tech.TechnologyManager
+	
+	// 协议处理器
+	coreHandler  *CoreHandler
+	chatHandler  *chat.ChatHandler
 }
 
 func NewGameServer(db database.DB, cfg *config.Config) *GameServer {
@@ -45,8 +49,16 @@ func NewGameServer(db database.DB, cfg *config.Config) *GameServer {
 	// 创建聊天管理器（独立线程）
 	chatMgr := chat.NewChatManager(players)
 
-	// 创建消息路由器
-	router := handler.NewMessageRouter(db, players, chatMgr)
+	// 创建协议处理器
+	coreHandler := NewCoreHandler(db, players)
+	chatHandler := chat.NewChatHandler(chatMgr)
+
+	// 创建统一路由器
+	router := network.NewRouter()
+	
+	// 注册消息处理器（按消息 ID 范围）
+	router.RegisterRangeHandler(1000, 1999, coreHandler)  // 核心协议
+	router.RegisterRangeHandler(4000, 4999, chatHandler)  // 聊天协议
 
 	// 创建游戏主循环（独立线程）
 	tickInterval := time.Duration(cfg.Game.TickInterval) * time.Millisecond
@@ -78,6 +90,8 @@ func NewGameServer(db database.DB, cfg *config.Config) *GameServer {
 		battleMgr:    battleMgr,
 		allianceMgr:  allianceMgr,
 		techMgr:      techMgr,
+		coreHandler:  coreHandler,
+		chatHandler:  chatHandler,
 	}
 }
 
