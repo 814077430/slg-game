@@ -106,76 +106,30 @@ func (h *CoreHandler) handleLoginRequest(sess session.Session, data []byte) *net
 		return createLoginErrorResponse(errors.NewError(errors.ErrInvalidRequest, "Username and password required"))
 	}
 
-	// 方案 B：先查内存索引，没有再查 MongoDB
-	// 解决异步写入导致的数据一致性问题
-	var playerID uint64
-	var found bool
-
-	// 方案 B：先从内存用户名索引查找玩家 ID
-	cachedPlayerID, exists := h.playerMgr.GetPlayerIDByUsername(request.Username)
-	if exists {
-		playerID = cachedPlayerID
-		found = true
+	// 直接从内存查找玩家 ID（不访问 MongoDB）
+	playerID, exists := h.playerMgr.GetPlayerIDByUsername(request.Username)
+	if !exists {
+		log.WithFields(map[string]interface{}{
+			"username": request.Username,
+		}).Warn("Login failed - user not found in memory")
+		return createLoginErrorResponse(errors.ErrUserNotFoundErr)
 	}
 
-	// 内存没有，再查数据库
-	if !found {
-		collection := h.db.GetCollection("players")
-		player, err := collection.FindOne(map[string]interface{}{"username": request.Username})
-		
-		if err != nil || player == nil {
-			log.WithFields(map[string]interface{}{
-				"username": request.Username,
-			}).Warn("Login failed - user not found")
-			return createLoginErrorResponse(errors.ErrUserNotFoundErr)
-		}
-
-		// 验证密码
-		hashedPassword := hashPassword(request.Password)
-		if player["password_hash"] != hashedPassword {
-			log.WithFields(map[string]interface{}{
-				"username": request.Username,
-			}).Warn("Login failed - wrong password")
-			return createLoginErrorResponse(errors.ErrWrongPasswordErr)
-		}
-
-		// 获取玩家 ID
-		switch v := player["player_id"].(type) {
-		case int64:
-			playerID = uint64(v)
-		case uint64:
-			playerID = v
-		}
+	// 从内存缓存验证密码（不访问 MongoDB）
+	cache, cacheExists := h.playerMgr.GetPlayerCache(playerID)
+	if !cacheExists {
+		log.WithFields(map[string]interface{}{
+			"player_id": playerID,
+		}).Warn("Login failed - player cache not found")
+		return createLoginErrorResponse(errors.ErrUserNotFoundErr)
 	}
 
-	// 从内存缓存验证密码（方案 B 关键优化：不依赖数据库）
-	if found {
-		if cache, cacheExists := h.playerMgr.GetPlayerCache(playerID); cacheExists {
-			hashedPassword := hashPassword(request.Password)
-			if cache.PasswordHash != hashedPassword {
-				log.WithFields(map[string]interface{}{
-					"username": request.Username,
-				}).Warn("Login failed - wrong password")
-				return createLoginErrorResponse(errors.ErrWrongPasswordErr)
-			}
-		} else {
-			// 缓存不存在，降级查数据库验证
-			collection := h.db.GetCollection("players")
-			playerData, err := collection.FindOne(map[string]interface{}{"player_id": int64(playerID)})
-			if err != nil || playerData == nil {
-				log.WithFields(map[string]interface{}{
-					"player_id": playerID,
-				}).Warn("Login failed - player data not found")
-				return createLoginErrorResponse(errors.ErrUserNotFoundErr)
-			}
-			hashedPassword := hashPassword(request.Password)
-			if playerData["password_hash"] != hashedPassword {
-				log.WithFields(map[string]interface{}{
-					"username": request.Username,
-				}).Warn("Login failed - wrong password")
-				return createLoginErrorResponse(errors.ErrWrongPasswordErr)
-			}
-		}
+	hashedPassword := hashPassword(request.Password)
+	if cache.PasswordHash != hashedPassword {
+		log.WithFields(map[string]interface{}{
+			"username": request.Username,
+		}).Warn("Login failed - wrong password")
+		return createLoginErrorResponse(errors.ErrWrongPasswordErr)
 	}
 
 	// 更新最后登录时间（异步写入）
@@ -306,17 +260,11 @@ func (h *CoreHandler) handleRegisterRequest(sess session.Session, data []byte) *
 		"research":       make(map[string]int32),
 	}
 
-	// 使用异步写入器（不阻塞）
-	if mongoDB, ok := h.db.(*database.MongoDatabase); ok {
-		writer := mongoDB.GetWriter()
-		writer.InsertOne("players", newPlayer)
-	} else {
-		// 降级为同步写入（MemoryDB）
-		err = collection.InsertOne(newPlayer)
-		if err != nil {
-			log.Errorf("Failed to create player: %v", err)
-			return createRegisterErrorResponse(errors.ErrDatabaseErrorErr)
-		}
+	// 注册必须同步写入，确保立即可查
+	err = collection.InsertOne(newPlayer)
+	if err != nil {
+		log.Errorf("Failed to create player: %v", err)
+		return createRegisterErrorResponse(errors.ErrDatabaseErrorErr)
 	}
 
 	// 方案 B 关键优化：注册时同时更新内存索引和玩家缓存
