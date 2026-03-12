@@ -28,11 +28,12 @@ type PlayerCache struct {
 
 // PlayerManager 玩家管理器
 type PlayerManager struct {
-	players        map[uint64]*session.PlayerInfo      // 在线玩家
+	players        map[uint64]*session.PlayerInfo      // 在线玩家（一直在内存）
 	sessions       map[uint64]session.Session          // 在线会话
-	offlinePlayers map[uint64]*OfflinePlayer           // 离线玩家（保留 1 小时）
+	offlinePlayers map[uint64]*OfflinePlayer           // 离线玩家（保留 10 分钟）
 	usernameIndex  map[string]uint64                   // 用户名→玩家 ID 索引
-	playerCache    map[uint64]*PlayerCache             // 玩家数据缓存（含密码哈希）
+	playerCache    map[uint64]*PlayerCache             // 玩家数据缓存（含密码哈希，保留 10 分钟）
+	offlineTime    map[uint64]time.Time                // 玩家离线时间（用于清理）
 	mutex          sync.RWMutex
 	cleanupTicker  *time.Ticker
 	stopChan       chan struct{}
@@ -44,13 +45,14 @@ func NewPlayerManager() *PlayerManager {
 		players:        make(map[uint64]*session.PlayerInfo),
 		sessions:       make(map[uint64]session.Session),
 		offlinePlayers: make(map[uint64]*OfflinePlayer),
-		usernameIndex:  make(map[string]uint64),   // 用户名索引
+		usernameIndex:  make(map[string]uint64),     // 用户名索引
 		playerCache:    make(map[uint64]*PlayerCache), // 玩家数据缓存
+		offlineTime:    make(map[uint64]time.Time),  // 离线时间
 		stopChan:       make(chan struct{}),
 	}
 
-	// 启动定期清理协程（每 5 分钟清理过期离线数据）
-	pm.cleanupTicker = time.NewTicker(5 * time.Minute)
+	// 启动定期清理协程（每 2 分钟检查一次，清理离线 10 分钟的玩家）
+	pm.cleanupTicker = time.NewTicker(2 * time.Minute)
 	go pm.cleanupLoop()
 
 	return pm
@@ -70,15 +72,32 @@ func (pm *PlayerManager) cleanupLoop() {
 	}
 }
 
-// cleanupExpiredOfflinePlayers 清理过期（>1 小时）的离线玩家数据
+// cleanupExpiredOfflinePlayers 清理过期（>10 分钟）的离线玩家数据
 func (pm *PlayerManager) cleanupExpiredOfflinePlayers() {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
 
 	now := time.Now()
-	for playerID, offline := range pm.offlinePlayers {
-		if now.Sub(offline.LastLogout) > time.Hour {
+	expiredDuration := 10 * time.Minute // 离线 10 分钟后清理
+
+	// 清理离线超过 10 分钟的玩家
+	for playerID, offlineTime := range pm.offlineTime {
+		if now.Sub(offlineTime) > expiredDuration {
+			// 先获取用户名（用于删除索引）
+			var username string
+			if offline, exists := pm.offlinePlayers[playerID]; exists {
+				username = offline.Info.Username
+			}
+			// 删除离线玩家记录
 			delete(pm.offlinePlayers, playerID)
+			// 删除玩家缓存
+			delete(pm.playerCache, playerID)
+			// 删除用户名索引
+			if username != "" {
+				delete(pm.usernameIndex, username)
+			}
+			// 删除离线时间记录
+			delete(pm.offlineTime, playerID)
 		}
 	}
 }
@@ -98,20 +117,24 @@ func (pm *PlayerManager) AddPlayer(playerID uint64, username string, sess sessio
 	pm.sessions[playerID] = sess
 }
 
-// RemovePlayer 移除玩家（离线数据保留 1 小时）
+// RemovePlayer 移除玩家（离线数据保留 10 分钟）
 func (pm *PlayerManager) RemovePlayer(playerID uint64) {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
 
-	// 将玩家移到离线列表
+	// 将玩家移到离线列表（数据保留 10 分钟）
 	if player, exists := pm.players[playerID]; exists {
 		pm.offlinePlayers[playerID] = &OfflinePlayer{
 			Info:       player,
 			LastLogout: time.Now(),
 		}
+		// 记录离线时间（用于清理）
+		pm.offlineTime[playerID] = time.Now()
+		// 从在线列表移除
 		delete(pm.players, playerID)
 	}
 
+	// 会话移除
 	delete(pm.sessions, playerID)
 }
 
@@ -131,9 +154,11 @@ func (pm *PlayerManager) RemoveOfflinePlayer(playerID uint64) {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
 	delete(pm.offlinePlayers, playerID)
+	delete(pm.offlineTime, playerID)
 }
 
 // AddPlayerCache 添加玩家缓存（注册时调用，包含密码哈希）
+// 玩家缓存保留 10 分钟（与离线玩家数据同步清理）
 func (pm *PlayerManager) AddPlayerCache(playerID uint64, username, passwordHash string) {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
@@ -142,6 +167,12 @@ func (pm *PlayerManager) AddPlayerCache(playerID uint64, username, passwordHash 
 		PlayerID:     playerID,
 		Username:     username,
 		PasswordHash: passwordHash,
+	}
+	// 如果是离线玩家，记录离线时间（用于清理）
+	if _, exists := pm.offlinePlayers[playerID]; exists {
+		if _, timeExists := pm.offlineTime[playerID]; !timeExists {
+			pm.offlineTime[playerID] = time.Now()
+		}
 	}
 }
 
