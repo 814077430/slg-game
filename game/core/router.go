@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"slg-game/database"
@@ -35,19 +36,37 @@ const (
 )
 
 type MessageRouter struct {
-	handlers  map[uint32]func(*PlayerSession, []byte) *network.Packet
-	db        database.DB
-	playerMgr *PlayerManager
-	chatMgr   *chat.ChatManager
+	handlers    map[uint32]func(*PlayerSession, []byte) *network.Packet
+	db          database.DB
+	playerMgr   *PlayerManager
+	chatMgr     *chat.ChatManager
+	nextPlayerID int64
 }
 
 func NewMessageRouter(db database.DB, playerMgr *PlayerManager, chatMgr *chat.ChatManager) *MessageRouter {
 	router := &MessageRouter{
-		handlers:  make(map[uint32]func(*PlayerSession, []byte) *network.Packet),
-		db:        db,
-		playerMgr: playerMgr,
-		chatMgr:   chatMgr,
+		handlers:     make(map[uint32]func(*PlayerSession, []byte) *network.Packet),
+		db:           db,
+		playerMgr:    playerMgr,
+		chatMgr:      chatMgr,
+		nextPlayerID: 10001,
 	}
+	
+	// 从数据库加载最大玩家 ID（遍历查找最大值）
+	collection := db.GetCollection("players")
+	allPlayers := collection.GetAll()
+	if len(allPlayers) > 0 {
+		var maxID int64 = 0
+		for _, player := range allPlayers {
+			if pid, ok := player["player_id"].(int64); ok && pid > maxID {
+				maxID = pid
+			}
+		}
+		if maxID > 0 {
+			router.nextPlayerID = maxID + 1
+		}
+	}
+	
 	router.registerHandlers()
 	return router
 }
@@ -190,14 +209,8 @@ func (mr *MessageRouter) handleRegisterRequest(session *PlayerSession, data []by
 		return createRegisterErrorResponse(errors.ErrUserExistsErr)
 	}
 
-	// 生成新的玩家 ID
-	lastPlayer, err := collection.FindOne(map[string]interface{}{})
-	newPlayerID := int64(10001)
-	if err == nil && lastPlayer != nil {
-		if lastID, ok := lastPlayer["player_id"].(int64); ok {
-			newPlayerID = lastID + 1
-		}
-	}
+	// 生成新的玩家 ID（原子递增）
+	newPlayerID := atomic.AddInt64(&mr.nextPlayerID, 1) - 1
 
 	// 创建新玩家
 	hashedPassword := hashPassword(request.Password)
