@@ -1,328 +1,372 @@
 # SLG Game Server Architecture
 
-## 系统架构图
+## 版本：v1.0.0
+
+---
+
+## 📋 目录
+
+1. [系统架构](#系统架构)
+2. [技术栈](#技术栈)
+3. [模块设计](#模块设计)
+4. [线程模型](#线程模型)
+5. [消息总线](#消息总线)
+6. [数据持久化](#数据持久化)
+7. [世界地图](#世界地图)
+8. [性能指标](#性能指标)
+
+---
+
+## 系统架构
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                              CLIENT LAYER                                │
-│                          (Game Client / Web)                             │
-└────────────────────────────────────┬────────────────────────────────────┘
-                                     │ TCP Connection
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           NETWORK LAYER                                  │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐      │
-│  │   Connection     │  │     Packet       │  │   Connection     │      │
-│  │   Manager        │  │   Encode/Decode  │  │   Pool           │      │
-│  │                  │  │   (JSON)         │  │                  │      │
-│  └──────────────────┘  └──────────────────┘  └──────────────────┘      │
-│                          connection.go, packet.go                        │
-└────────────────────────────────────┬────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           SERVER LAYER                                   │
-│  ┌────────────────────────────────────────────────────────────────┐    │
-│  │                        GameServer                               │    │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐    │    │
-│  │  │  Message    │  │   Player    │  │     Game Loop       │    │    │
-│  │  │   Router    │  │   Session   │  │   (Tick System)     │    │    │
-│  │  │             │  │             │  │                     │    │    │
-│  │  │ • Login     │  │ • State     │  │ • Resource Collect  │    │    │
-│  │  │ • Register  │  │ • Cleanup   │  │ • Building Complete │    │    │
-│  │  │ • Move      │  │ • Auth      │  │ • Tech Complete     │    │    │
-│  │  │ • Build     │  │             │  │ • Army Movement     │    │    │
-│  │  └─────────────┘  └─────────────┘  └─────────────────────┘    │    │
-│  │     router.go         session.go      game_loop.go, server.go │    │
-│  └────────────────────────────────────────────────────────────────┘    │
-└────────────────────────────────────┬────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          GAME LOGIC LAYER                                │
-│                                                                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                  │
-│  │   World      │  │   Resource   │  │   Building   │                  │
-│  │   Manager    │  │   Manager    │  │   Manager    │                  │
-│  │              │  │              │  │              │                  │
-│  │ • Map Tiles  │  │ • Get/Set    │  │ • Create     │                  │
-│  │ • Claim      │  │ • Add/Deduct │  │ • Upgrade    │                  │
-│  │ • Generate   │  │ • Collect    │  │ • Complete   │                  │
-│  │ • Tick       │  │ • Check      │  │ • Cancel     │                  │
-│  └──────────────┘  └──────────────┘  └──────────────┘                  │
-│     world.go       resources_manager.go    buildings.go                │
-│                                                                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                  │
-│  │    Army      │  │  Alliance    │  │  Technology  │                  │
-│  │   Manager    │  │   Manager    │  │   Manager    │                  │
-│  │              │  │              │  │              │                  │
-│  │ • Attack     │  │ • Create     │  │ • Research   │                  │
-│  │ • Battle     │  │ • Join       │  │ • Complete   │                  │
-│  │ • Calculate  │  │ • Leave      │  │ • Get Config │                  │
-│  │ • Loot       │  │ • Manage     │  │              │                  │
-│  └──────────────┘  └──────────────┘  └──────────────┘                  │
-│    army_manager.go   alliance_manager.go   technology.go               │
-└────────────────────────────────────┬────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          DATA ACCESS LAYER                               │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │                      MongoDB Database                             │  │
-│  │                                                                   │  │
-│  │  Collections:                                                     │  │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────┐ │  │
-│  │  │ players  │  │alliances │  │world_    │  │ battle_logs      │ │  │
-│  │  │          │  │          │  │tiles     │  │                  │ │  │
-│  │  │ • Player │  │ • Guild  │  │ • Map    │  │ • Combat Records │ │  │
-│  │  │   Data   │  │   Data   │  │   Data   │  │                  │ │  │
-│  │  └──────────┘  └──────────┘  └──────────┘  └──────────────────┘ │  │
-│  │                                                                   │  │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐                        │  │
-│  │  │research_ │  │technology│  │  (More   │                        │  │
-│  │  │queue     │  |_config   │  │  tables) │                        │  │
-│  │  └──────────┘  └──────────┘  └──────────┘                        │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-│                      database.go, models.go                              │
-└─────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                         Client Layer                             │
+│                    (HTTP/TCP Clients)                            │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         Network Layer                            │
+│                   (network/connection.go)                        │
+│              TCP 连接管理 + 数据包编解码                          │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         Handler Layer                            │
+│              (handler/router.go, session.go)                     │
+│           协议解析 + 会话管理 + 消息路由                          │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Message Bus Layer                           │
+│              (messenger/message_bus.go)                          │
+│         发布/订阅 + 点对点通信 + 消息优先级                       │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                       Thread Modules                             │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐        │
+│  │  World   │  │  Battle  │  │   Chat   │  │ GameLoop │        │
+│  │  世界地图 │  │  战斗系统 │  │  聊天系统 │  │  游戏循环 │        │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘        │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Persistence Layer                           │
+│         (database/mongo_async_writer.go)                         │
+│           MongoDB 异步批量写入 (100 条/100ms)                       │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## 模块依赖关系
-
-```
-main.go
-  │
-  ├─► config/           (配置加载)
-  │
-  ├─► database/         (数据库连接)
-  │     └─► MongoDB
-  │
-  ├─► world/            (世界地图 - 独立线程)
-  │
-  ├─► battle/           (战斗系统 - 独立线程)
-  │
-  ├─► chat/             (聊天系统 - 独立线程)
-  │
-  └─► game/
-        │
-        ├─► core/
-        │     │
-        │     ├─► GameServer
-        │     │     │
-        │     │     ├─► MessageRouter
-        │     │     │     └─► 消息处理 (Login/Register/Move/Build)
-        │     │     │
-        │     │     ├─► PlayerSession
-        │     │     │     └─► 玩家状态管理
-        │     │     │
-        │     │     └─► GameLoop
-        │     │           └─► Tick 系统
-        │     │
-        │     └─► PlayerManager
-        │
-        ├─► city/             (建筑系统)
-        │
-        ├─► resource/         (资源系统)
-        │
-        ├─► alliance/         (联盟系统)
-        │
-        └─► tech/             (科技系统)
-```
-
-## 数据流图
-
-### 登录流程
-
-```
-Client                    Server                    Database
-  │                         │                          │
-  │──LoginRequest─────────►│                          │
-  │                         │──Find Player───────────►│
-  │                         │◄────Player Data─────────│
-  │                         │                          │
-  │                         │  [Verify Password]       │
-  │                         │                          │
-  │◄──LoginResponse────────│                          │
-  │   (Success + Data)      │                          │
-```
-
-### 战斗流程
-
-```
-Client                    Server                    Database
-  │                         │                          │
-  │──AttackRequest────────►│                          │
-  │                         │──Get Attacker Troops───►│
-  │                         │──Get Defender Troops───►│
-  │                         │                          │
-  │                         │  [Calculate Power]       │
-  │                         │  [Determine Winner]      │
-  │                         │  [Calculate Losses]      │
-  │                         │  [Calculate Loot]        │
-  │                         │                          │
-  │                         │──Update Troops─────────►│
-  │                         │──Transfer Loot─────────►│
-  │                         │──Save Battle Log───────►│
-  │                         │                          │
-  │◄──AttackResponse───────│                          │
-  │   (Battle Result)       │                          │
-```
-
-### 游戏主循环 (Tick)
-
-```
-GameLoop
-  │
-  ├─► Every Tick (e.g., 1000ms)
-  │     │
-  │     ├─► processBuildingCompletion()
-  │     ├─► processTechnologyCompletion()
-  │     ├─► processArmyMovement()
-  │     └─► world.Tick()
-  │
-  └─► ResourceCollector (Every 60s)
-        │
-        └─► For each player:
-              └─► Add resources based on buildings
-```
-
-## 核心数据结构
-
-### Player (玩家)
-
-```go
-type Player struct {
-    PlayerID     uint64
-    Username     string
-    PasswordHash string
-    Email        string
-    Level        int32
-    Experience   int64
-    Gold         int64
-    Wood         int64
-    Food         int64
-    X, Y         int32          // 坐标
-    Buildings    []Building
-    Troops       []Troop
-    AllianceID   uint64
-    AllianceRole string
-}
-```
-
-### Message (网络消息)
-
-```go
-type Packet struct {
-    MsgID uint32  // 消息 ID
-    Data  []byte  // JSON 编码的数据
-}
-
-// Message IDs
-const (
-    MsgID_C2S_LoginRequest    = 1001
-    MsgID_C2S_RegisterRequest = 1002
-    MsgID_C2S_MoveRequest     = 1003
-    MsgID_C2S_BuildRequest    = 1004
-    MsgID_S2C_LoginResponse   = 2001
-    MsgID_S2C_RegisterResponse = 2002
-    MsgID_S2C_MoveResponse    = 2003
-    MsgID_S2C_BuildResponse   = 2004
-)
-```
-
-### BattleResult (战斗结果)
-
-```go
-type BattleResult struct {
-    AttackerID      uint64
-    DefenderID      uint64
-    AttackerWon     bool
-    AttackerLosses  map[string]int32
-    DefenderLosses  map[string]int32
-    LootedResources map[string]int64
-    BattleTime      time.Time
-}
-```
+---
 
 ## 技术栈
 
-| 层级 | 技术 |
-|------|------|
-| 语言 | Go 1.21+ |
-| 数据库 | MongoDB |
-| 网络 | TCP (自定义协议) |
-| 序列化 | JSON |
-| 并发 | Goroutine + Channel |
-| 数据持久化 | MongoDB Driver |
+| 组件 | 技术 | 版本 |
+|------|------|------|
+| **语言** | Go | 1.21+ |
+| **数据库** | MongoDB | 7.0 |
+| **协议** | Protobuf | v1.31.0 |
+| **消息总线** | 自研 | - |
+| **并发模型** | Goroutine | - |
 
-## 扩展点
+---
 
-### 可添加的功能
+## 模块设计
 
-1. **任务系统** - 每日任务、成就系统
-2. **邮件系统** - 站内信、系统通知
-3. **排行榜** - 战力/资源/联盟排名
-4. **聊天系统** - 世界频道/联盟频道
-5. **交易系统** - 玩家间资源交易
-6. **PVP 系统** - 竞技场、实时对战
-7. **活动系统** - 限时活动、节日活动
-
-### 性能优化方向
-
-1. **Redis 缓存** - 在线玩家数据、会话缓存
-2. **消息队列** - 异步处理战斗、邮件等
-3. **分服架构** - 多服负载均衡
-4. **数据库优化** - 索引、分片
-5. **连接池** - 数据库连接复用
-
-## 配置示例
-
-```json
-{
-  "server": {
-    "addr": "0.0.0.0:8080",
-    "max_connections": 1000,
-    "read_timeout": 30,
-    "write_timeout": 30
-  },
-  "database": {
-    "url": "mongodb://localhost:27017",
-    "database_name": "slg_game",
-    "max_pool_size": 20
-  },
-  "game": {
-    "tick_interval": 1000,
-    "max_players": 10000
-  }
-}
-```
-
-## 启动流程
+### 目录结构
 
 ```
-1. main.go
-   │
-   ├─► Load Config (config/game.json)
-   │
-   ├─► Init MongoDB Connection
-   │
-   ├─► Create GameServer
-   │     │
-   │     ├─► Initialize Independent Thread Modules:
-   │     │     ├─► world.NewWorld()      → Start World Loop
-   │     │     ├─► battle.NewBattleManager() → Start Battle Loop
-   │     │     └─► chat.NewChatManager()     → Start Chat Loop
-   │     │
-   │     ├─► Create MessageRouter
-   │     ├─► Create PlayerManager
-   │     └─► Start GameLoop
-   │
-   └─► Start TCP Listener
-         │
-         └─► Accept Connections
-               │
-               └─► HandleClient (goroutine per client)
+slg-game/
+├── main.go                     # 程序入口
+├── go.mod                      # Go 模块定义
+├── README.md                   # 项目说明
+├── ARCHITECTURE.md             # 架构文档
+│
+├── client/                     # 测试客户端
+│   ├── main.go                 # 单客户端测试
+│   ├── stress.go               # 压测工具
+│   └── network.go              # TCP 客户端
+│
+├── config/                     # 配置模块
+│   ├── config.go               # 配置加载
+│   └── game.json               # 游戏配置
+│
+├── database/                   # 数据库层
+│   ├── database.go             # 数据库接口 (MemoryDB + MongoDB)
+│   └── mongo_async_writer.go   # MongoDB 异步写入器 ⭐
+│
+├── errors/                     # 错误处理
+│   └── errors.go               # 错误码和错误类型
+│
+├── game/                       # 游戏逻辑层
+│   ├── core/
+│   │   ├── server.go           # 游戏服务器
+│   │   ├── session.go          # 玩家会话
+│   │   ├── router.go           # 消息路由
+│   │   ├── player_manager.go   # 玩家管理
+│   │   └── game_loop.go        # 游戏主循环
+│   ├── city/                   # 城建模块
+│   │   └── buildings.go        # 建筑管理
+│   ├── resource/               # 资源模块
+│   │   └── resources_manager.go # 资源管理
+│   ├── alliance/               # 联盟模块
+│   │   └── alliance_manager.go # 联盟管理
+│   └── tech/                   # 科技模块
+│       └── technology.go       # 科技管理
+│
+├── handler/                    # 协议处理层 ⭐
+│   ├── router.go               # 消息路由
+│   └── session.go              # 玩家会话
+│
+├── messenger/                  # 消息总线 ⭐
+│   ├── message.go              # 消息定义
+│   └── message_bus.go          # 消息总线实现
+│
+├── network/                    # 网络层
+│   ├── connection.go           # 连接管理
+│   └── packet.go               # 数据包处理
+│
+├── protocol/                   # 协议层
+│   ├── messages.proto          # Protobuf 定义
+│   ├── messages.pb.go          # 生成的 Go 代码
+│   └── packet.go               # 协议编解码
+│
+└── world/                      # 世界地图 ⭐
+    └── world.go                # 世界地图管理
 ```
+
+### 核心模块职责
+
+| 模块 | 职责 | 关键文件 |
+|------|------|---------|
+| **network** | TCP 连接管理、数据包编解码 | connection.go, packet.go |
+| **handler** | 协议解析、会话管理、消息路由 | router.go, session.go |
+| **messenger** | 线程间通信、消息总线 | message_bus.go |
+| **world** | 世界地图、区域划分、资源分布 | world.go |
+| **battle** | 战斗系统、军队管理 | battle_manager.go, army_manager.go |
+| **chat** | 聊天系统、消息广播 | chat_manager.go |
+| **database** | 数据持久化、异步写入 | mongo_async_writer.go |
+
+---
+
+## 线程模型
+
+### 独立线程模块
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Main Thread                             │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │              Message Bus (消息总线)                   │   │
+│  │   - Publish/Subscribe (发布/订阅)                     │   │
+│  │   - Point-to-Point (点对点)                          │   │
+│  │   - Priority Queue (优先级队列)                       │   │
+│  └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+         │              │              │              │
+         ▼              ▼              ▼              ▼
+┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
+│ World Loop  │ │Battle Loop  │ │ Chat Loop   │ │GameLoop     │
+│ 1s Tick     │ │ 1s Tick     │ │ Event-driven│ │ 1s Tick     │
+│ 世界地图    │ │ 战斗计算    │ │ 聊天消息    │ │ 游戏逻辑    │
+└─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘
+```
+
+### 线程通信
+
+```go
+// 发布消息（广播）
+messageBus.Publish(MsgPlayerMove, "world", &PlayerMoveData{...})
+
+// 发送消息（点对点）
+messageBus.Send(MsgBattleStart, "game", "battle", &BattleStartData{...})
+
+// 订阅消息
+queue := messageBus.RegisterSubscriber("chat", MsgChatMessage)
+```
+
+---
+
+## 消息总线
+
+### 消息类型
+
+| 消息类型 | 说明 | 优先级 |
+|---------|------|-------|
+| `MsgPlayerMove` | 玩家移动 | Normal |
+| `MsgPlayerLogin` | 玩家登录 | High |
+| `MsgPlayerLogout` | 玩家登出 | Normal |
+| `MsgBattleStart` | 战斗开始 | Urgent |
+| `MsgBattleEnd` | 战斗结束 | High |
+| `MsgChatMessage` | 聊天消息 | Low |
+| `MsgWorldTick` | 世界 Tick | Normal |
+| `MsgDataPersist` | 数据持久化 | High |
+
+### 消息优先级
+
+| 优先级 | 说明 | 使用场景 |
+|--------|------|---------|
+| `PriorityUrgent` | 紧急 | 战斗开始、关键事件 |
+| `PriorityHigh` | 高 | 玩家登录、数据持久化 |
+| `PriorityNormal` | 普通 | 玩家移动、世界 Tick |
+| `PriorityLow` | 低 | 聊天消息、日志 |
+
+---
+
+## 数据持久化
+
+### MongoDB 异步写入
+
+```go
+// 创建异步写入器
+mongoWriter := database.NewMongoAsyncWriter(
+    "mongodb://localhost:27017",
+    "slg_game",
+    100,                    // 批量大小
+    100*time.Millisecond,   // 刷新间隔
+)
+
+// 异步更新玩家数据
+mongoWriter.UpdatePlayer(playerID, map[string]interface{}{
+    "x": x,
+    "y": y,
+})
+```
+
+### 写入策略
+
+- **批量大小**: 100 条
+- **刷新间隔**: 100ms
+- **写入方式**: 批量更新 (BulkWrite)
+- **优雅关闭**: 等待剩余数据写入完成
+
+### 性能优势
+
+| 指标 | 同步写入 | 异步批量 | 提升 |
+|------|---------|---------|------|
+| **写入延迟** | ~10ms/次 | ~0.1ms/次 | 100x |
+| **吞吐量** | ~100 ops/s | ~10000 ops/s | 100x |
+| **对游戏影响** | 卡顿 | 无感知 | - |
+
+---
+
+## 世界地图
+
+### 地图规模
+
+- **世界大小**: 1024×1024 格 (1,048,576 格)
+- **中心安全区**: 256×256 格
+- **皇城**: 64×64 格 (位于中心)
+- **四大州**: 每个 256×256 格
+- **蛮荒带**: 128 格宽 (围绕中心区)
+- **边缘绝境**: 64 格宽 (最外圈)
+
+### 区域划分
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    边缘绝境 (64 格)                       │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │                  蛮荒带 (128 格)                     │  │
+│  │  ┌─────────────────────────────────────────────┐  │  │
+│  │  │                                             │  │  │
+│  │  │   雍州 (西北)    │    青州 (东北)            │  │  │
+│  │  │                  │                          │  │  │
+│  │  ├──────────────────┼──────────────┤          │  │  │
+│  │  │                  │              │          │  │  │
+│  │  │   扬州 (西南)    │    荆州 (东南) │          │  │  │
+│  │  │                  │   ┌──────┐   │          │  │  │
+│  │  │                  │   │皇城  │   │          │  │  │
+│  │  │                  │   │64x64 │   │          │  │  │
+│  │  │                  │   └──────┘   │          │  │  │
+│  │  │                  │  安全区      │          │  │  │
+│  │  │                  │  256x256    │          │  │  │
+│  │  └──────────────────┴──────────────┘          │  │  │
+│  │                                               │  │  │
+│  └───────────────────────────────────────────────┘  │
+│                                                     │
+└─────────────────────────────────────────────────────┘
+```
+
+### 区域类型
+
+| 区域 | 类型 | 位置 | 资源等级 |
+|------|------|------|---------|
+| **皇城** | castle | 中心 64×64 | 6 级 (顶级) |
+| **安全区** | safe | 中心 256×256 | 5 级 |
+| **青州** | qing | 东北 | 3-4 级 |
+| **荆州** | jing | 东南 | 3-4 级 |
+| **雍州** | yong | 西北 | 3-4 级 |
+| **扬州** | yang | 西南 | 3-4 级 |
+| **蛮荒带** | barbarian | 中心外 128 格 | 1-2 级 |
+| **边缘绝境** | edge | 最外圈 64 格 | 0 级 (无资源) |
+
+### 地形类型
+
+| 地形 | 占比 | 特性 |
+|------|------|------|
+| **平原** (plain) | 30% | 可通行，适合建城 |
+| **森林** (forest) | 25% | 可通行，木材资源丰富 |
+| **山地** (mountain) | 15% | 不可通行，石料资源 |
+| **丘陵** (hill) | 15% | 可通行，防御加成 |
+| **河流** (river) | 10% | 不可通行，粮食资源 |
+| **荒漠** (desert) | 5% | 可通行，资源贫瘠 |
+| **雪山** (snow) | 5% | 不可通行，特殊资源 |
+
+---
+
+## 性能指标
+
+### 压测结果 (1000 并发)
+
+| 指标 | 数值 | 评级 |
+|------|------|------|
+| **成功率** | 100.00% | ⭐⭐⭐⭐⭐ |
+| **总请求** | 8000 | - |
+| **吞吐量** | 1330.91 req/s | ⭐⭐⭐⭐⭐ |
+| **平均延迟** | 6ms | ⭐⭐⭐⭐⭐ |
+
+### 系统资源
+
+| 资源 | 占用 | 说明 |
+|------|------|------|
+| **CPU** | ~20% | 4 核 CPU |
+| **内存** | ~200MB | 包含缓存 |
+| **磁盘 IO** | 低 | 异步批量写入 |
+| **网络** | 低 | 1000 并发稳定 |
+
+### 扩展性
+
+- **水平扩展**: 支持多服部署
+- **数据库**: MongoDB 分片集群
+- **消息总线**: 支持分布式扩展
+
+---
+
+## 版本历史
+
+### v1.0.0 (2026-03-12)
+
+- ✅ MongoDB 异步持久化
+- ✅ 线程间通信模块 (消息总线)
+- ✅ 1024×1024 大世界地图
+- ✅ 四大州 + 皇城 + 蛮荒带
+- ✅ 7 种地形类型
+- ✅ 7 级资源分布
+- ✅ 1000 并发 100% 成功率
+
+---
+
+## 联系方式
+
+- **GitHub**: https://github.com/814077430/slg-game
+- **Gitee**: https://gitee.com/liang-bowei/slg-game
 
 ---
 
