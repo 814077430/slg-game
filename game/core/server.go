@@ -15,15 +15,16 @@ import (
 	"slg-game/game/alliance"
 	"slg-game/game/tech"
 	"slg-game/chat"
+	"slg-game/handler"
 )
 
 type GameServer struct {
 	db       database.DB
 	config   *config.Config
-	router   *MessageRouter
+	router   *handler.MessageRouter
 	gameLoop *GameLoop
 	world    *world.World
-	players  *PlayerManager
+	players  *handler.PlayerManager
 	chatMgr  *chat.ChatManager
 	
 	// 模块管理器
@@ -39,13 +40,13 @@ func NewGameServer(db database.DB, cfg *config.Config) *GameServer {
 	world := world.NewWorld(db)
 
 	// 创建玩家管理器（视野范围 10 格）
-	players := NewPlayerManager(10)
+	players := handler.NewPlayerManager(10)
 
 	// 创建聊天管理器（独立线程）
 	chatMgr := chat.NewChatManager(players)
 
 	// 创建消息路由器
-	router := NewMessageRouter(db, players, chatMgr)
+	router := handler.NewMessageRouter(db, players, chatMgr)
 
 	// 创建游戏主循环（独立线程）
 	tickInterval := time.Duration(cfg.Game.TickInterval) * time.Millisecond
@@ -89,7 +90,7 @@ func (gs *GameServer) HandleClient(conn net.Conn) {
 	log.Printf("New client connected: %s", conn.RemoteAddr())
 
 	// 创建玩家会话
-	session := NewPlayerSession(connection, gs.db, gs.config, gs.players)
+	session := handler.NewPlayerSession(connection, gs.db, gs.config, gs.players)
 
 	for {
 		packet, err := connection.ReadPacket()

@@ -1,4 +1,4 @@
-package core
+package handler
 
 import (
 	"crypto/sha256"
@@ -36,10 +36,10 @@ const (
 )
 
 type MessageRouter struct {
-	handlers    map[uint32]func(*PlayerSession, []byte) *network.Packet
-	db          database.DB
-	playerMgr   *PlayerManager
-	chatMgr     *chat.ChatManager
+	handlers     map[uint32]func(*PlayerSession, []byte) *network.Packet
+	db           database.DB
+	playerMgr    *PlayerManager
+	chatMgr      *chat.ChatManager
 	nextPlayerID int64
 }
 
