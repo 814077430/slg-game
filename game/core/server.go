@@ -147,6 +147,11 @@ func (gs *GameServer) HandleClient(conn net.Conn) {
 	log.Printf("Client disconnected: %s", conn.RemoteAddr())
 }
 
+// HandleWebSocketClient 处理 WebSocket 客户端连接
+func (gs *GameServer) HandleWebSocketClient(conn net.Conn) {
+	gs.HandleClient(conn)
+}
+
 // Shutdown 优雅关闭服务器
 func (gs *GameServer) Shutdown() {
 	log.Println("Shutting down server...")
